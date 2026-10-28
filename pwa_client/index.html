@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="پیچا ویزیت">
+    <meta name="theme-color" content="#020025">
+    <link rel="apple-touch-icon" href="apple-touch-icon.png">
+    <link rel="manifest" href="manifest.json">
+    <title>پیچا ویزیت | PeechaVisit</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        :root{
+            --primary:#020025;
+            --primary-mid:#0d0d4a;
+            --accent:#4f6ef7;
+            --accent2:#7c3aed;
+            --success:#059669;
+            --danger:#dc2626;
+            --bg:#f0f2fa;
+            --card:#fff;
+            --border:#e2e8f0;
+            --text:#1e293b;
+            --muted:#64748b;
+            --radius:15px;
+            --shadow:0 4px 20px rgba(2,0,37,.10);
+        }
+        *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+        body{
+            font-family:'Vazirmatn',Tahoma,sans-serif;
+            background:var(--bg);color:var(--text);
+            direction:rtl;min-height:100vh;padding-bottom:95px;
+            -webkit-font-smoothing:antialiased;
+        }
+
+        /* ── هدر ── */
+        .app-header{
+            background:linear-gradient(135deg,var(--primary) 0%,var(--primary-mid) 60%,#1a0050 100%);
+            color:white;padding:15px 16px 22px;text-align:center;
+            border-radius:0 0 24px 24px;
+            box-shadow:0 6px 28px rgba(2,0,37,.4);
+            position:relative;overflow:hidden;
+        }
+        .app-header::before{content:'';position:absolute;top:-50px;left:-50px;width:180px;height:180px;background:rgba(255,255,255,.04);border-radius:50%}
+        .app-header::after{content:'';position:absolute;bottom:-40px;right:-30px;width:140px;height:140px;background:rgba(79,110,247,.08);border-radius:50%}
+        .header-inner{position:relative;z-index:1;display:flex;align-items:center;justify-content:center;gap:10px}
+        .header-logo{width:44px;height:44px;border-radius:12px;border:2px solid rgba(255,255,255,.25);flex-shrink:0}
+        .header-text h2{font-size:17px;font-weight:900;text-align:right}
+        .header-text p{font-size:10px;opacity:.65;text-align:right;margin-top:2px;direction:ltr;text-align:left}
+
+        /* ── container ── */
+        .container{padding:12px;max-width:480px;margin:0 auto}
+
+        /* ── وضعیت ── */
+        .status-bar{
+            display:flex;align-items:center;gap:10px;
+            background:var(--card);padding:9px 13px;
+            border-radius:var(--radius);box-shadow:var(--shadow);
+            margin-bottom:12px;font-size:12px;font-weight:700;
+        }
+        .status-dot{width:9px;height:9px;border-radius:50%;background:#94a3b8;flex-shrink:0;transition:all .3s}
+        .status-dot.online{background:#10b981;box-shadow:0 0 0 3px rgba(16,185,129,.2);animation:pulse 2s infinite}
+        .status-dot.offline{background:#ef4444;box-shadow:0 0 0 3px rgba(239,68,68,.2)}
+        @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+
+        /* ── منو ── */
+        .main-menu{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:12px}
+        .menu-btn{
+            background:var(--card);border:2px solid var(--border);
+            border-radius:var(--radius);padding:13px 8px;
+            font-family:'Vazirmatn',Tahoma,sans-serif;
+            font-size:12px;font-weight:700;color:var(--primary);
+            cursor:pointer;text-align:center;transition:all .22s;
+            box-shadow:var(--shadow);line-height:1.6;
+        }
+        .menu-btn:active{transform:scale(.96)}
+        .menu-btn.active{
+            background:linear-gradient(135deg,var(--primary),var(--primary-mid));
+            border-color:transparent;color:white;
+            box-shadow:0 6px 18px rgba(2,0,37,.35);transform:translateY(-1px);
+        }
+        .sync-btn{
+            grid-column:span 2;
+            background:linear-gradient(135deg,#065f46,var(--success));
+            border:none;border-radius:var(--radius);padding:12px;
+            color:white;font-family:'Vazirmatn',Tahoma,sans-serif;
+            font-size:13px;font-weight:700;cursor:pointer;
+            display:flex;align-items:center;justify-content:center;gap:8px;
+            box-shadow:0 4px 14px rgba(5,150,105,.3);transition:all .2s;
+        }
+        .sync-btn:active{transform:scale(.97)}
+        .sync-badge{background:#ef4444;color:white;padding:2px 8px;border-radius:20px;font-size:11px;display:none;font-weight:800}
+
+        /* ── کارت ── */
+        .card{
+            background:var(--card);padding:15px;border-radius:18px;
+            margin-bottom:11px;box-shadow:var(--shadow);display:none;
+            border:1px solid rgba(255,255,255,.8);
+        }
+        .card.visible,.card-always{display:block;animation:slideUp .28s ease}
+        @keyframes slideUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+        .card-title{
+            font-size:13px;font-weight:800;color:var(--primary);
+            padding-bottom:9px;margin-bottom:12px;
+            border-bottom:2px solid var(--bg);
+            display:flex;align-items:center;gap:6px;
+        }
+
+        /* ── فرم ── */
+        label{font-size:11px;font-weight:700;color:var(--muted);display:block;margin-top:10px;margin-bottom:3px}
+        input,select,textarea{
+            width:100%;padding:10px 12px;border-radius:9px;
+            border:1.5px solid var(--border);
+            font-family:'Vazirmatn',Tahoma,sans-serif;
+            font-size:13px;color:var(--text);background:#f8fafc;
+            transition:border-color .2s,box-shadow .2s;outline:none;direction:rtl;
+        }
+        input:focus,select:focus,textarea:focus{
+            border-color:var(--accent);
+            box-shadow:0 0 0 3px rgba(79,110,247,.12);background:white;
+        }
+        .search-input{background:#f0f4ff;border:2px dashed var(--accent);font-weight:700}
+        textarea{resize:none}
+
+        /* ── دکمه ── */
+        .btn{
+            width:100%;padding:11px;border-radius:9px;border:none;
+            font-family:'Vazirmatn',Tahoma,sans-serif;font-size:12px;font-weight:700;
+            cursor:pointer;transition:all .2s;
+            display:flex;align-items:center;justify-content:center;gap:6px;margin-top:7px;
+        }
+        .btn:active{transform:scale(.97)}
+        .btn-primary{background:linear-gradient(135deg,var(--primary),var(--primary-mid));color:white}
+        .btn-success{background:linear-gradient(135deg,#047857,var(--success));color:white}
+        .btn-danger{background:var(--danger);color:white;padding:4px 9px;width:auto;font-size:11px;border-radius:6px;margin-top:0}
+        .btn-camera{background:linear-gradient(135deg,#1e293b,#334155);color:white}
+        .btn-sm{width:auto;padding:8px 18px;font-size:12px}
+
+        /* ── دوربین ── */
+        .cam-wrap{border-radius:13px;overflow:hidden;background:#0f172a;margin-top:8px;display:none;position:relative}
+        .cam-wrap video{width:100%;display:block}
+        #video{transform:scaleX(-1)}
+        .cam-footer{position:absolute;bottom:10px;left:0;right:0;display:flex;justify-content:center}
+        canvas{width:100%;border-radius:12px;display:none;margin-top:8px;border:2px solid var(--accent)}
+
+        /* ── سبد ── */
+        .basket-table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}
+        .basket-table th{background:var(--bg);padding:8px 5px;color:var(--muted);font-weight:700;text-align:center;font-size:11px}
+        .basket-table td{padding:8px 5px;border-bottom:1px solid var(--bg);text-align:center;font-size:12px}
+
+        /* ── بخش پرداخت ── */
+        .pay-section{display:none;margin-top:4px;padding-top:10px;border-top:1px dashed var(--border)}
+        .pay-section.active{display:block;animation:slideUp .2s ease}
+
+        /* ── تاریخ شمسی custom ── */
+        .jalali-picker{display:grid;grid-template-columns:2fr 1fr 1fr;gap:6px;margin-top:4px}
+        .jalali-picker select{padding:9px 8px;font-size:12px;text-align:center;direction:rtl}
+
+        /* ── دکمه ثبت ── */
+        .submit-wrap{
+            position:fixed;bottom:0;left:0;right:0;
+            padding:10px 14px 14px;
+            background:linear-gradient(to top,var(--bg) 75%,transparent);z-index:20;
+        }
+        .btn-submit{
+            width:100%;max-width:480px;margin:0 auto;display:flex;
+            padding:15px;font-size:15px;font-weight:800;border-radius:16px;
+            background:linear-gradient(135deg,var(--primary),var(--accent2));
+            color:white;border:none;cursor:pointer;
+            box-shadow:0 8px 28px rgba(2,0,37,.4);
+            transition:all .2s;align-items:center;justify-content:center;gap:8px;
+        }
+        .btn-submit:active{transform:scale(.98)}
+        .btn-submit:disabled{opacity:.6}
+
+        /* ── footer ── */
+        .app-footer{
+            text-align:center;padding:14px 12px 6px;
+            font-size:11px;color:var(--muted);direction:rtl;
+        }
+        .app-footer a{color:var(--accent);text-decoration:none;font-weight:700}
+        .app-footer a:hover{text-decoration:underline}
+
+        .grid2{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+        .success-msg{background:#d1fae5;border:1px solid #10b981;border-radius:9px;padding:8px 12px;text-align:center;font-weight:700;font-size:12px;color:#065f46;margin-top:6px;display:none}
+        .ios-hint{background:#fef3c7;border:1px solid #f59e0b;border-radius:11px;padding:10px 12px;font-size:12px;color:#92400e;margin-bottom:11px;display:none;line-height:1.7}
+    </style>
+</head>
+<body>
+
+<div class="app-header">
+    <div class="header-inner">
+        <img src="icon-192.png" class="header-logo" alt="logo" onerror="this.style.display='none'">
+        <div class="header-text">
+            <h2>پیچا ویزیت</h2>
+            <p>PeechaVisit.ir | v2.2</p>
+        </div>
+    </div>
+</div>
+
+<div class="container">
+
+    <div class="ios-hint" id="ios-hint">
+        📲 برای نصب روی آیفون: <b>Share</b> ← <b>Add to Home Screen</b>
+    </div>
+
+    <div class="status-bar">
+        <div class="status-dot" id="status-dot"></div>
+        <span id="net-status">در حال بررسی شبکه...</span>
+    </div>
+
+    <div class="main-menu">
+        <button class="menu-btn" id="btn-menu-visit" onclick="showSection('visit')">📝<br>ثبت ویزیت</button>
+        <button class="menu-btn" id="btn-menu-order" onclick="showSection('order')">📦<br>ویزیت + سفارش</button>
+        <button class="menu-btn" id="btn-menu-pay"   onclick="showSection('pay')">💰<br>ویزیت + دریافت</button>
+        <button class="sync-btn" onclick="syncLocalDataToServer()">
+            🔄 همگام‌سازی
+            <span class="sync-badge" id="sync-count">0</span>
+        </button>
+    </div>
+
+    <!-- کارت پایه -->
+    <div class="card card-always" id="section-base">
+        <div class="card-title">📍 انتخاب مشتری و تأیید حضور</div>
+        <label>🔍 جستجوی مشتری:</label>
+        <input type="text" id="customer-search" class="search-input" placeholder="نام یا کد مشتری..." oninput="filterCustomers()">
+        <label>انتخاب طرف حساب:</label>
+        <select id="main-customer-select"><option>در حال بارگذاری...</option></select>
+        <label>📸 سلفی حضور در محل:</label>
+        <button type="button" id="cam-toggle-btn" class="btn btn-camera" onclick="openCamera()">📷 باز کردن دوربین سلفی</button>
+        <div class="cam-wrap" id="camera-wrapper">
+            <video id="video" autoplay playsinline muted></video>
+            <div class="cam-footer">
+                <button type="button" class="btn btn-success btn-sm" onclick="takeSnapshot()">✅ ثبت سلفی</button>
+            </div>
+        </div>
+        <canvas id="canvas"></canvas>
+        <input type="hidden" id="selfie-base64">
+        <div class="success-msg" id="selfie-ok">✅ سلفی با موفقیت ثبت شد</div>
+        <label>📝 توضیحات:</label>
+        <textarea id="visit-desc" rows="2" placeholder="توضیحات اختیاری..."></textarea>
+    </div>
+
+    <!-- کارت سفارش -->
+    <div class="card" id="section-order">
+        <div class="card-title">📦 فاکتور سفارش کالا</div>
+        <label>🔍 جستجوی کالا:</label>
+        <input type="text" id="article-search" class="search-input" placeholder="نام یا کد کالا..." oninput="filterArticles()">
+        <label>انتخاب کالا:</label>
+        <select id="order-article-select" onchange="updatePrice()"><option>در حال بارگذاری...</option></select>
+        <div class="grid2" style="margin-top:8px">
+            <div>
+                <label>قیمت واحد (ریال):</label>
+                <input type="number" id="order-price" readonly style="background:#f0f4ff;color:var(--accent);font-weight:700">
+            </div>
+            <div>
+                <label>تعداد:</label>
+                <input type="number" id="order-qty" value="1" min="1">
+            </div>
+        </div>
+        <button type="button" class="btn btn-success" onclick="addArticleToBasket()">➕ افزودن به سبد</button>
+        <label>اقلام سبد:</label>
+        <table class="basket-table">
+            <thead><tr><th>کالا</th><th>تعداد</th><th>قیمت</th><th>حذف</th></tr></thead>
+            <tbody id="basket-body"><tr><td colspan="4" style="color:#94a3b8;padding:12px;text-align:center">سبد خالی</td></tr></tbody>
+        </table>
+    </div>
+
+    <!-- کارت دریافت -->
+    <div class="card" id="section-pay">
+        <div class="card-title">💰 اطلاعات تسویه مالی</div>
+
+        <label>نوع دریافت:</label>
+        <select id="pay-type" onchange="handlePayTypeChange()">
+            <option value="نقدی">💵 نقدی</option>
+            <option value="چک">📋 چک</option>
+            <option value="حواله">🏦 حواله / کارت به کارت</option>
+        </select>
+
+        <label>مبلغ دریافتی (ریال):</label>
+        <input type="number" id="pay-amount" placeholder="مبلغ به ریال">
+
+        <!-- نقدی -->
+        <div class="pay-section active" id="cash-section">
+            <label>توضیحات (اختیاری):</label>
+            <input type="text" id="cash-desc" placeholder="توضیح تکمیلی">
+        </div>
+
+        <!-- چک -->
+        <div class="pay-section" id="check-section">
+            <div class="grid2">
+                <div><label>شماره چک:</label><input type="text" id="check-number" placeholder="شماره چک"></div>
+                <div><label>شماره صیادی:</label><input type="text" id="check-sayyadi" placeholder="شماره صیادی"></div>
+            </div>
+            <!-- ✅ تاریخ سررسید شمسی -->
+            <label>تاریخ سررسید (شمسی):</label>
+            <div class="jalali-picker">
+                <select id="check-due-year">
+                    <option value="">سال</option>
+                </select>
+                <select id="check-due-month">
+                    <option value="">ماه</option>
+                    <option value="01">فروردین</option><option value="02">اردیبهشت</option>
+                    <option value="03">خرداد</option><option value="04">تیر</option>
+                    <option value="05">مرداد</option><option value="06">شهریور</option>
+                    <option value="07">مهر</option><option value="08">آبان</option>
+                    <option value="09">آذر</option><option value="10">دی</option>
+                    <option value="11">بهمن</option><option value="12">اسفند</option>
+                </select>
+                <select id="check-due-day">
+                    <option value="">روز</option>
+                </select>
+            </div>
+            <input type="hidden" id="check-due-jalali">
+            <label>📷 عکس چک:</label>
+            <button type="button" class="btn btn-camera" id="check-cam-btn" onclick="openCheckCamera()">📸 عکس از چک بگیر</button>
+            <div class="cam-wrap" id="check-cam-wrap">
+                <video id="check-video" autoplay playsinline muted style="width:100%;display:block"></video>
+                <div class="cam-footer">
+                    <button type="button" class="btn btn-success btn-sm" onclick="takeCheckSnapshot()">✅ ثبت عکس چک</button>
+                </div>
+            </div>
+            <canvas id="check-canvas"></canvas>
+            <input type="hidden" id="check-image-b64">
+            <div class="success-msg" id="check-img-ok">✅ عکس چک ثبت شد</div>
+        </div>
+
+        <!-- حواله -->
+        <div class="pay-section" id="transfer-section">
+            <label>شماره حساب / شبا / کارت مقصد:</label>
+            <input type="text" id="transfer-account" placeholder="IR... یا شماره کارت/حساب">
+            <label>شماره پیگیری حواله:</label>
+            <input type="text" id="transfer-tracking" placeholder="کد رهگیری (اختیاری)">
+            <!-- ✅ تاریخ حواله شمسی -->
+            <label>تاریخ حواله (شمسی):</label>
+            <div class="jalali-picker">
+                <select id="transfer-date-year"><option value="">سال</option></select>
+                <select id="transfer-date-month">
+                    <option value="">ماه</option>
+                    <option value="01">فروردین</option><option value="02">اردیبهشت</option>
+                    <option value="03">خرداد</option><option value="04">تیر</option>
+                    <option value="05">مرداد</option><option value="06">شهریور</option>
+                    <option value="07">مهر</option><option value="08">آبان</option>
+                    <option value="09">آذر</option><option value="10">دی</option>
+                    <option value="11">بهمن</option><option value="12">اسفند</option>
+                </select>
+                <select id="transfer-date-day"><option value="">روز</option></select>
+            </div>
+            <input type="hidden" id="transfer-date-jalali">
+            <label>📷 عکس رسید حواله:</label>
+            <button type="button" class="btn btn-camera" id="transfer-cam-btn" onclick="openTransferCamera()">📸 عکس از رسید حواله</button>
+            <div class="cam-wrap" id="transfer-cam-wrap">
+                <video id="transfer-video" autoplay playsinline muted style="width:100%;display:block"></video>
+                <div class="cam-footer">
+                    <button type="button" class="btn btn-success btn-sm" onclick="takeTransferSnapshot()">✅ ثبت عکس رسید</button>
+                </div>
+            </div>
+            <canvas id="transfer-canvas"></canvas>
+            <input type="hidden" id="transfer-image-b64">
+            <div class="success-msg" id="transfer-img-ok">✅ عکس رسید ثبت شد</div>
+        </div>
+    </div>
+
+    <!-- footer -->
+    <div class="app-footer">
+        <a href="https://peecha.ir" target="_blank">🌐 peecha.ir</a>
+        &nbsp;|&nbsp; پیچا ویزیت &copy; ۱۴۰۵
+        &nbsp;|&nbsp; <span style="direction:ltr;display:inline-block">PeechaVisit</span>
+    </div>
+
+</div>
+
+<div class="submit-wrap">
+    <button class="btn-submit" id="submit-btn" onclick="submitIntegratedForm()">
+        💾 ثبت نهایی و ارسال به پیچا
+    </button>
+</div>
+
+<script src="app.js"></script>
+<script>
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('sw.js').catch(e => console.log('SW خطا:', e));
+        });
+    }
+    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    if (isIOS && !window.matchMedia('(display-mode: standalone)').matches)
+        document.getElementById('ios-hint').style.display = 'block';
+
+    // پر کردن سال‌های شمسی
+    function fillJalaliYears() {
+        const curYear = 1405;
+        ['check-due-year','transfer-date-year'].forEach(id => {
+            const sel = document.getElementById(id);
+            for (let y = curYear; y <= curYear + 3; y++) {
+                const o = document.createElement('option');
+                o.value = y; o.textContent = y;
+                sel.appendChild(o);
+            }
+            if (sel) sel.value = curYear;
+        });
+        // روزها
+        ['check-due-day','transfer-date-day'].forEach(id => {
+            const sel = document.getElementById(id);
+            for (let d = 1; d <= 31; d++) {
+                const o = document.createElement('option');
+                o.value = String(d).padStart(2,'0');
+                o.textContent = d;
+                sel.appendChild(o);
+            }
+        });
+        // تاریخ امروز پیش‌فرض
+        setDefaultJalaliDates();
+    }
+
+    function setDefaultJalaliDates() {
+        // تاریخ شمسی امروز تقریبی
+        const now = new Date();
+        // محاسبه ساده شمسی
+        const gYear = now.getFullYear(), gMonth = now.getMonth()+1, gDay = now.getDate();
+        // تبدیل ساده میلادی به شمسی (برای پیش‌فرض)
+        let jYear = gYear - 621;
+        let jMonth = gMonth - 3;
+        if (jMonth <= 0) { jMonth += 12; jYear--; }
+        if (jMonth > 12) { jMonth -= 12; jYear++; }
+        const jMonthStr = String(jMonth).padStart(2,'0');
+
+        ['check-due','transfer-date'].forEach(prefix => {
+            const ySel = document.getElementById(prefix+'-year');
+            const mSel = document.getElementById(prefix+'-month');
+            const dSel = document.getElementById(prefix+'-day');
+            if (ySel) ySel.value = jYear;
+            if (mSel) mSel.value = jMonthStr;
+            if (dSel) dSel.value = String(gDay).padStart(2,'0');
+        });
+    }
+
+    fillJalaliYears();
+</script>
+</body>
+</html>

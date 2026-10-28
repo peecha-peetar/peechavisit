@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="پیچا ویزیت">
+    <meta name="theme-color" content="#020025">
+    <link rel="apple-touch-icon" href="apple-touch-icon.png">
+    <link rel="manifest" href="manifest.json">
+    <title>ورود | پیچا ویزیت</title>
+    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        :root { --primary:#020025; --accent:#4f6ef7; --accent2:#7c3aed; }
+        * { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent }
+        body {
+            font-family:'Vazirmatn',Tahoma,sans-serif;
+            background:linear-gradient(135deg,var(--primary) 0%,#0d0d4a 50%,#1a0050 100%);
+            min-height:100vh; display:flex; align-items:center; justify-content:center;
+            direction:rtl; padding:20px;
+        }
+        .login-wrap {
+            background:white; border-radius:24px; padding:40px 32px;
+            width:100%; max-width:400px;
+            box-shadow:0 24px 64px rgba(2,0,37,.5);
+            animation:fadeUp .4s ease;
+        }
+        @keyframes fadeUp { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
+        .logo-wrap { text-align:center; margin-bottom:28px }
+        .logo-wrap img { width:72px; height:72px; border-radius:18px; margin-bottom:12px; border:3px solid #e2e8f0 }
+        .logo-wrap h1 { font-size:22px; font-weight:900; color:var(--primary) }
+        .logo-wrap p  { font-size:12px; color:#94a3b8; margin-top:3px; direction:ltr }
+        .form-group { margin-bottom:16px }
+        label { display:block; font-size:12px; font-weight:700; color:#475569; margin-bottom:5px }
+        .input-wrap { position:relative }
+        .input-wrap input {
+            width:100%; padding:13px 44px 13px 14px; border-radius:11px;
+            border:1.5px solid #e2e8f0; font-family:'Vazirmatn',Tahoma,sans-serif;
+            font-size:14px; color:#1e293b; background:#f8fafc; direction:rtl;
+            outline:none; transition:border .2s, box-shadow .2s;
+        }
+        .input-wrap input:focus {
+            border-color:var(--accent); background:white;
+            box-shadow:0 0 0 3px rgba(79,110,247,.12);
+        }
+        .input-icon {
+            position:absolute; right:14px; top:50%; transform:translateY(-50%);
+            font-size:16px; pointer-events:none;
+        }
+        .btn-login {
+            width:100%; padding:15px; border:none; border-radius:13px;
+            background:linear-gradient(135deg,var(--primary),var(--accent2));
+            color:white; font-family:'Vazirmatn',Tahoma,sans-serif;
+            font-size:15px; font-weight:800; cursor:pointer;
+            box-shadow:0 6px 20px rgba(2,0,37,.35);
+            transition:all .2s; margin-top:8px;
+        }
+        .btn-login:active { transform:scale(.98) }
+        .btn-login:disabled { opacity:.6 }
+        .error-msg {
+            background:#fee2e2; border:1px solid #fca5a5; border-radius:10px;
+            padding:10px 14px; font-size:13px; color:#991b1b;
+            margin-bottom:14px; display:none; direction:rtl;
+        }
+        .error-msg.show { display:block; animation:fadeUp .2s ease }
+        .footer-txt {
+            text-align:center; font-size:11px; color:#94a3b8;
+            margin-top:24px; direction:ltr;
+        }
+        .footer-txt a { color:var(--accent); text-decoration:none; font-weight:700 }
+        .loading { display:none; text-align:center; padding:8px; color:#64748b; font-size:13px }
+        .loading.show { display:block }
+    </style>
+</head>
+<body>
+<div class="login-wrap">
+    <div class="logo-wrap">
+        <img src="icon-192.png" alt="logo" onerror="this.style.display='none'">
+        <h1>پیچا ویزیت</h1>
+        <p>PeechaVisit | سامانه مدیریت ویزیتور</p>
+    </div>
+
+    <div class="error-msg" id="error-msg"></div>
+    <div class="error-msg" id="expired-msg" style="background:#fff3cd;border-color:#ffc107;color:#856404">
+        ⏰ اتصال به سرور برقرار شد. لطفاً دوباره وارد شوید.
+    </div>
+    <div class="loading" id="loading">⏳ در حال بررسی...</div>
+
+    <div class="form-group">
+        <label>نام کاربری</label>
+        <div class="input-wrap">
+            <span class="input-icon">👤</span>
+            <input type="text" id="username" placeholder="نام کاربری خود را وارد کنید"
+                   autocomplete="username" autocapitalize="none">
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label>رمز عبور</label>
+        <div class="input-wrap">
+            <span class="input-icon">🔒</span>
+            <input type="password" id="password" placeholder="رمز عبور خود را وارد کنید"
+                   autocomplete="current-password">
+        </div>
+    </div>
+
+    <button class="btn-login" id="login-btn" onclick="doLogin()">
+        🔑 ورود به سامانه
+    </button>
+
+    <div class="footer-txt">
+        <a href="https://peecha.ir" target="_blank">🌐 peecha.ir</a>
+        &nbsp;|&nbsp; PeechaVisit © ۱۴۰۵
+    </div>
+</div>
+
+<script>
+// ── آدرس API ──
+// hostname رو از URL فعلی می‌گیریم (همون سرور که PWA روشه)
+const _HOST = window.location.hostname;
+const _PORT = 5000;
+const API   = `http://${_HOST}:${_PORT}/api`;
+
+// debug - نمایش در console
+console.log('[PeechaVisit] API:', API);
+console.log('[PeechaVisit] hostname:', window.location.hostname);
+console.log('[PeechaVisit] online:', navigator.onLine);
+
+// Enter برای ورود
+document.addEventListener('keydown', e => {
+    if (e.key === 'Enter') doLogin();
+});
+
+// نمایش پیام در صورت انقضای token
+(function checkExpired() {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('expired') === '1') {
+        document.getElementById('expired-msg').classList.add('show');
+    }
+})();
+
+async function doLogin() {
+    const username = document.getElementById('username').value.trim();
+    const password = document.getElementById('password').value;
+    const btn      = document.getElementById('login-btn');
+    const errEl    = document.getElementById('error-msg');
+    const loadEl   = document.getElementById('loading');
+
+    if (!username || !password) {
+        showError('نام کاربری و رمز عبور الزامی است.');
+        return;
+    }
+
+    btn.disabled = true;
+    errEl.classList.remove('show');
+    loadEl.classList.add('show');
+
+    try {
+        // timeout 10 ثانیه برای جلوگیری از انتظار طولانی
+        const controller = new AbortController();
+        const timeoutId  = setTimeout(() => controller.abort(), 10000);
+
+        const res = await fetch(`${API}/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password }),
+            signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        const data = await res.json();
+
+        if (data.status === 'success') {
+            // ✅ sessionStorage - با بستن مرورگر پاک میشه
+            // ✅ اطلاعات کاربر → localStorage (ماندگار، آفلاین)
+            localStorage.setItem('pv_user_v2', JSON.stringify({
+                id:       data.user.id,
+                name:     data.user.name,
+                role:     data.user.role,
+                username: username,
+                loginAt:  Date.now()
+            }));
+            // ✅ token → sessionStorage (امنیت)
+            if (data.token) {
+                sessionStorage.setItem('pv_token_v2', data.token);
+            }
+            window.location.replace('index.html');
+        } else {
+            showError(data.message || 'خطا در ورود');
+        }
+    } catch(err) {
+        console.error('[PeechaVisit] Login error:', err);
+        const msg = !navigator.onLine
+            ? 'اینترنت متصل نیست.'
+            : `خطا در اتصال به سرور (${API}). مطمئن شوید سرور روشن است.`;
+        showError(msg);
+    } finally {
+        btn.disabled = false;
+        loadEl.classList.remove('show');
+    }
+}
+
+function showError(msg) {
+    const el = document.getElementById('error-msg');
+    el.textContent = '⚠️ ' + msg;
+    el.classList.add('show');
+}
+</script>
+</body>
+</html>

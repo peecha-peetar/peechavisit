@@ -1,0 +1,20 @@
+# PeechaVisit (پیچا ویزیت) - وابستگی‌های پایتون
+# نصب:  pip install -r requirements.txt
+
+# Flask API  (app.py)
+Flask>=3.0
+flask-cors>=4.0
+
+# اتصال به SQL Server  (همه فایل‌ها)
+pyodbc>=5.0
+
+# داشبورد و پنل مدیریت  (dashboard.py / admin.py)
+streamlit>=1.30
+pandas>=2.0
+
+# نقشه در داشبورد
+folium>=0.15
+streamlit-folium>=0.18
+
+# تاریخ شمسی
+jdatetime>=4.1

@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+
+# Logs
+logs/
+*.log
+
+# ── داده‌های حساس: هرگز در گیت قرار نگیرند ──
+# فایل‌های دیتابیس SQL Server
+*.mdf
+*.ldf
+*.bak
+*.rar
+
+# تصاویر واقعی مشتریان (چک / حواله / سلفی) — اطلاعات مالی و شخصی
+static/checks/*
+static/transfers/*
+static/selfies/*
+!static/checks/.gitkeep
+!static/transfers/.gitkeep
+!static/selfies/.gitkeep
