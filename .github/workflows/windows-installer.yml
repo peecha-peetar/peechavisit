@@ -66,11 +66,13 @@ jobs:
               $b = (Invoke-WebRequest http://127.0.0.1:8501/_stcore/health -UseBasicParsing).StatusCode
               $c = (Invoke-WebRequest http://127.0.0.1:8502/_stcore/health -UseBasicParsing).StatusCode
               $ok = ($a -eq 200 -and $b -eq 200 -and $c -eq 200)
+              "try $i : web=$a dashboard=$b admin=$c"
             } catch { }
           }
           Get-ChildItem "$env:PEECHA_HOME\logs" | ForEach-Object { "== $($_.Name)"; Get-Content $_.FullName -Tail 15 }
           Stop-Process -Id $p.Id -Force
           if (-not $ok) { throw "services did not start" }
+          "SMOKE OK"
 
       - name: Download WinSW
         shell: pwsh
@@ -83,7 +85,7 @@ jobs:
         run: |
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
-          & $iscc "/DAppVersion=${{ steps.ver.outputs.version }}" packaging\installer.iss
+          & $iscc /Q "/DAppVersion=${{ steps.ver.outputs.version }}" packaging\installer.iss
           if ($LASTEXITCODE -ne 0) { throw "iscc failed" }
 
       - uses: actions/upload-artifact@v5
