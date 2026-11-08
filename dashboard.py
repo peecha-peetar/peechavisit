@@ -455,7 +455,7 @@ visits_df = qry(f"""
            v.latitude, v.longitude,
            ISNULL(v.selfie_path,'')        AS selfie_path,
            ISNULL(v.description,'')        AS description,
-           ISNULL(c.C_Name,v.customer_code) AS C_Name
+           ISNULL(CAST(c.C_Name AS NVARCHAR(200)),v.customer_code) AS C_Name
            {visitor_col}
     FROM visits v
     LEFT JOIN dejavuDB1.dbo.customer c ON v.customer_code=c.C_Code
@@ -467,7 +467,7 @@ visits_df = qry(f"""
 orders_df = qry(f"""
     SELECT o.id, o.visitor_id, o.customer_code, o.order_date, o.order_time,
            o.latitude, o.longitude, o.total_amount,
-           ISNULL(c.C_Name,o.customer_code) AS C_Name
+           ISNULL(CAST(c.C_Name AS NVARCHAR(200)),o.customer_code) AS C_Name
            {", vis2.full_name AS visitor_name" if sel_vid is None else ", \'\' AS visitor_name"}
     FROM orders o
     LEFT JOIN dejavuDB1.dbo.customer c ON o.customer_code=c.C_Code
@@ -486,7 +486,7 @@ pays_df = qry(f"""
            ISNULL(p.transfer_account,'')    AS transfer_account,
            ISNULL(p.transfer_image_path,'') AS transfer_image_path,
            ISNULL(p.tracking_number,'')     AS tracking_number,
-           ISNULL(c.C_Name,p.customer_code) AS C_Name
+           ISNULL(CAST(c.C_Name AS NVARCHAR(200)),p.customer_code) AS C_Name
            {", vis3.full_name AS visitor_name" if sel_vid is None else ", \'\' AS visitor_name"}
     FROM payments p
     LEFT JOIN dejavuDB1.dbo.customer c ON p.customer_code=c.C_Code
@@ -987,7 +987,7 @@ if has_detail and detail_col is not None:
             try:
                 conn_it = get_conn()
                 its = pd.read_sql("""
-                    SELECT ISNULL(a.A_Name,oi.article_code) AS nm,
+                    SELECT ISNULL(CAST(a.A_Name AS NVARCHAR(200)),oi.article_code) AS nm,
                            CAST(oi.quantity AS FLOAT) AS qty,
                            CAST(oi.price AS BIGINT)   AS prc,
                            CAST(oi.quantity*oi.price AS BIGINT) AS tot
@@ -1132,7 +1132,7 @@ def make_excel_pays():
         cf = wb.add_format({'align':'right','font_name':'Tahoma','border':1})
         nf = wb.add_format({'align':'right','font_name':'Tahoma','border':1,'num_format':'#,##0'})
         p_all = qry("""
-            SELECT ISNULL(c.C_Name,p.customer_code) AS [نام مشتری],
+            SELECT ISNULL(CAST(c.C_Name AS NVARCHAR(200)),p.customer_code) AS [نام مشتری],
                    p.customer_code AS [کد مشتری],
                    CONVERT(VARCHAR,p.payment_date,23) AS [تاریخ],
                    CONVERT(VARCHAR,p.payment_time,108) AS [ساعت],

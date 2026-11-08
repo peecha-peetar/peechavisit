@@ -134,6 +134,11 @@ def mark_uid_done(cursor, uid):
     except: pass
 
 
+def fa_text(v) -> str:
+    """ي/ك عربی → ی/ک فارسی تا جستجو در اپ درست کار کند"""
+    return (v or '').strip().replace('ي', 'ی').replace('ك', 'ک').replace('ى', 'ی')
+
+
 def save_image(b64_data, folder, prefix, visitor_id, customer_code, date_str, time_str):
     """ذخیره عکس و برگرداندن مسیر"""
     if not b64_data:
@@ -199,32 +204,44 @@ def login():
 @app.route('/api/sync-data', methods=['GET'])
 @require_auth
 def sync_data():
+    step = 'اتصال به دیتابیس فروش'
     try:
         conn = get_conn(SALES_DB); cur = conn.cursor()
 
-        cur.execute("""
-            SELECT C_Code, C_Name, latitude, longitude
+        # مختصات مشتری فقط اگر این ستون‌ها در دیتابیس فروش وجود داشته باشند
+        step = 'بررسی ستون‌های جدول customer'
+        cur.execute("SELECT COL_LENGTH('customer','latitude'), COL_LENGTH('customer','longitude')")
+        has_geo = all(cur.fetchone())
+        geo = "latitude, longitude" if has_geo else "NULL, NULL"
+
+        # ✅ CAST به NVARCHAR: متن فارسی در ستون VARCHAR (کالیشن عربی) را
+        #    SQL Server درست تبدیل می‌کند؛ بدون آن pyodbc موقع خواندن خطا می‌دهد
+        step = 'خواندن مشتریان'
+        cur.execute(f"""
+            SELECT CAST(C_Code AS NVARCHAR(50)), CAST(C_Name AS NVARCHAR(200)), {geo}
             FROM customer WHERE [Delete]=0 OR [Delete] IS NULL
         """)
-        customers = [{"code":r[0], "name":(r[1] or '').strip(),
-                      "lat":r[2] or 0.0, "lng":r[3] or 0.0}
+        customers = [{"code":(r[0] or '').strip(), "name":fa_text(r[1]),
+                      "lat":float(r[2] or 0), "lng":float(r[3] or 0)}
                      for r in cur.fetchall()]
 
+        step = 'خواندن کالاها'
         cur.execute("""
-            SELECT A_Code, A_Name, Sel_Price, Exist
+            SELECT CAST(A_Code AS NVARCHAR(50)), CAST(A_Name AS NVARCHAR(200)), Sel_Price, Exist
             FROM article WHERE [Delete]=0 OR [Delete] IS NULL
         """)
-        articles = [{"code":r[0], "name":(r[1] or '').strip(),
+        articles = [{"code":(r[0] or '').strip(), "name":fa_text(r[1]),
                      "price":float(r[2] or 0), "stock":float(r[3] or 0)}
                     for r in cur.fetchall()]
 
         cur.close(); conn.close()
+        print(f"✅ sync-data | {len(customers)} مشتری | {len(articles)} کالا")
         return jsonify({"status":"success",
                         "customers":customers,
                         "articles":articles}), 200
     except Exception as e:
-        print(f"sync-data error: {e}")
-        return jsonify({"status":"error","message":str(e)}), 500
+        print(f"❌ sync-data error ({step}): {e}")
+        return jsonify({"status":"error","message":f"{step}: {e}"}), 500
 
 
 # ══════════════════════════════════════════

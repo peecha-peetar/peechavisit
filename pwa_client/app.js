@@ -196,11 +196,22 @@ function autoSync() {
 // ══════════════════════════════════════════
 // داده پایه — با token
 // ══════════════════════════════════════════
+// خطای دریافت داده پایه را به کاربر نشان بده (به‌جای «در حال بارگذاری...» دائمی)
+function showSyncError(msg) {
+    console.warn('[PeechaVisit] sync-data:', msg);
+    ['main-customer-select', 'order-article-select'].forEach(id => {
+        const s = document.getElementById(id);
+        if (s && (!s.options.length || !s.options[0].value || s.options[0].text.includes('بارگذاری')))
+            s.innerHTML = `<option value="">❌ دریافت لیست ناموفق — ${msg}</option>`;
+    });
+    alert('❌ لیست مشتری و کالا از سرور دریافت نشد:\n' + msg);
+}
+
 function fetchServerData() {
     apiFetch('/sync-data')
-        .then(r => r.json())
+        .then(r => r.json().catch(() => ({ message: `پاسخ نامعتبر از سرور (کد ${r.status})` })))
         .then(d => {
-            if (!d.customers) return;
+            if (!d.customers) { showSyncError(d.message || 'خطای نامشخص سرور'); return; }
             allCustomersRaw = d.customers;
             allArticlesRaw  = d.articles;
             const tx = db.transaction("cached_data","readwrite");
@@ -209,8 +220,10 @@ function fetchServerData() {
             renderCustomers(allCustomersRaw);
             renderArticles(allArticlesRaw);
         }).catch(err => {
-            if (err.message !== 'TOKEN_EXPIRED')
-                console.warn('داده از کش محلی بارگذاری میشه');
+            if (err.message === 'TOKEN_EXPIRED') return;
+            // آفلاین: اگر کش داریم همان نمایش داده می‌شود
+            if (allCustomersRaw.length) console.warn('داده از کش محلی بارگذاری میشه');
+            else showSyncError(err.message === 'TIMEOUT' ? 'سرور دیر جواب داد' : 'اتصال به سرور برقرار نشد');
         });
 }
 
