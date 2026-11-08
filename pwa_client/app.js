@@ -81,6 +81,7 @@ function apiFetch(endpoint, options = {}) {
         headers: {
             'Content-Type': 'application/json',
             'X-Auth-Token': token,
+            'X-Device': pvDeviceHeader(),
             ...(options.headers || {})
         }
     }).then(res => {
@@ -631,9 +632,8 @@ function buildPaymentInfo() {
         const td = getJalaliDate("transfer-date");
         info.transfer_date = td ? td.gregorian : null;
         info.transfer_image = document.getElementById("transfer-image-b64").value || null;
-    } else {
-        info.cash_desc = document.getElementById("cash-desc").value;
     }
+    info.description = document.getElementById("cash-desc").value.trim();
     return info;
 }
 
@@ -682,6 +682,7 @@ function submitIntegratedForm() {
             client_date: localDateStr(now),
             client_time: now.toTimeString().slice(0,8),
             order_items: currentMode==="order" ? [...orderBasket] : [],
+            order_note: currentMode==="order" ? document.getElementById("order-note").value.trim() : "",
             payment_info: currentMode==="pay" ? buildPaymentInfo() : null
         };
 
@@ -809,7 +810,7 @@ function resetForm() {
     ['visit-desc','customer-search','article-search','cash-desc',
      'check-number','check-sayyadi','check-image-b64',
      'transfer-account','transfer-tracking','transfer-image-b64',
-     'selfie-base64','pay-amount'].forEach(id => {
+     'selfie-base64','pay-amount','order-note'].forEach(id => {
         const el = document.getElementById(id); if (el) el.value = "";
     });
     ['canvas','check-canvas','transfer-canvas'].forEach(id => {
@@ -966,3 +967,145 @@ function loadReport() {
         })
         .catch(err => { if (err.message !== 'TOKEN_EXPIRED') fromCache('اتصال به سرور برقرار نشد'); });
 }
+
+
+// ══════════════════════════════════════════
+// پیام‌ها — گفتگو با مدیر و همکاران
+// ──────────────────────────────────────────
+// هر ۳۰ ثانیه پیام‌های جدید از سرور گرفته می‌شود؛ آخرین پیام‌ها برای
+// مشاهدهٔ آفلاین در گوشی نگه داشته می‌شوند.
+// ══════════════════════════════════════════
+const MSG_KEY = 'pv_msgs_v1';
+let msgState = (() => { try { return JSON.parse(localStorage.getItem(MSG_KEY)) || null; } catch { return null; } })()
+            || { me: null, last: 0, list: [], contacts: [] };
+let chatWith = null, msgPolling = false;
+
+function saveMsgState() {
+    msgState.list = msgState.list.slice(-400);
+    try { localStorage.setItem(MSG_KEY, JSON.stringify(msgState)); } catch { }
+}
+const contactName = id => id === 'all' ? 'همه' :
+    ((msgState.contacts.find(c => c.id === id) || {}).name
+     || (msgState.list.find(m => m.from === id && m.from_name) || {}).from_name || 'کاربر');
+const timeFa = at => { const [d, t] = String(at || '').split(' '); return `${jdateFa(d)} ${faDigits((t || '').slice(0, 5))}`; };
+
+function unreadFrom(id) { return msgState.list.filter(m => m.to === msgState.me && !m.read && (id == null || m.from === id)).length; }
+function updateMsgBadge() {
+    const n = unreadFrom(null), b = document.getElementById('msg-badge');
+    b.textContent = faDigits(n); b.style.display = n ? 'inline-block' : 'none';
+}
+
+function pollMessages(showToast = true) {
+    if (msgPolling || !navigator.onLine || !getToken()) return Promise.resolve();
+    msgPolling = true;
+    return apiFetch(`/messages?after=${msgState.last}`).then(r => r.json()).then(d => {
+        if (d.status !== 'success') return;
+        if (msgState.me !== d.me) msgState = { ...msgState, me: d.me, last: 0, list: [] };
+        const fresh = d.messages.filter(m => m.id > msgState.last);
+        msgState.list.push(...fresh);
+        if (fresh.length) msgState.last = Math.max(...fresh.map(m => m.id));
+        saveMsgState(); updateMsgBadge();
+        const incoming = fresh.filter(m => m.to === d.me && !m.read && m.from !== chatWith);
+        if (showToast && incoming.length) {
+            const m = incoming[incoming.length - 1];
+            showToastMsg(`💬 ${m.from_name || contactName(m.from)}: ${m.body.slice(0, 60)}`, () => openChat(m.from));
+        }
+        if (chatWith !== null) renderChat();
+        else if (!document.getElementById('msg-view').hidden) renderContacts();
+    }).catch(() => { }).finally(() => { msgPolling = false; });
+}
+
+function showToastMsg(text, onClick) {
+    const t = document.getElementById('pv-toast');
+    t.textContent = text; t.hidden = false;
+    t.onclick = () => { t.hidden = true; onClick && onClick(); };
+    clearTimeout(t._h); t._h = setTimeout(() => { t.hidden = true; }, 6000);
+}
+
+function openMsgs() {
+    const v = document.getElementById('msg-view');
+    if (v.hidden) { v.hidden = false; history.pushState({ pvMsgs: 1 }, ''); }
+    closeChat(true);
+    renderContacts();
+    if (navigator.onLine) {
+        apiFetch('/contacts').then(r => r.json()).then(d => {
+            if (d.status === 'success') { msgState.contacts = d.contacts; saveMsgState(); renderContacts(); }
+        }).catch(() => { });
+        pollMessages(false);
+    }
+}
+
+function renderContacts() {
+    const sess = getSession() || {};
+    const rows = msgState.contacts.map(c => {
+        const conv = msgState.list.filter(m => m.from === c.id || m.to === c.id);
+        const last = conv[conv.length - 1];
+        return { c, last, unread: unreadFrom(c.id) };
+    }).sort((a, b) => (b.last ? b.last.id : 0) - (a.last ? a.last.id : 0));
+    const item = (id, name, sub, unread, av) => `<div class="msg-row" onclick="openChat(${id === 'all' ? "'all'" : id})">
+        <div class="msg-av">${av}</div>
+        <div class="info"><div class="n">${escHtml(name)}</div><div class="d">${escHtml(sub)}</div></div>
+        ${unread ? `<span class="c">${faDigits(unread)}</span>` : ''}</div>`;
+    document.getElementById('msg-contacts').innerHTML =
+        (sess.role === 'admin' ? item('all', 'پیام به همه', 'ارسال یک پیام برای همهٔ کاربران', 0, '📣') : '') +
+        rows.map(r => item(r.c.id, r.c.name + (r.c.role === 'admin' ? ' (مدیر)' : ''),
+            r.last ? r.last.body : 'هنوز پیامی نیست', r.unread, escHtml((r.c.name || '؟')[0]))).join('');
+    document.getElementById('msg-stamp').textContent = navigator.onLine ? '' :
+        (msgState.contacts.length ? 'حالت آفلاین — آخرین پیام‌های ذخیره‌شده' : 'برای دیدن پیام‌ها به سرور وصل شوید.');
+}
+
+function openChat(id) {
+    if (document.getElementById('msg-view').hidden) openMsgs();
+    chatWith = id;
+    document.getElementById('msg-title').textContent = contactName(id);
+    document.getElementById('msg-sub').textContent = id === 'all' ? 'پیام برای همهٔ کاربران' : 'گفتگو';
+    document.getElementById('msg-list-box').hidden = true;
+    document.getElementById('chat-box').hidden = false;
+    renderChat();
+    if (id !== 'all' && unreadFrom(id) && navigator.onLine) {
+        apiFetch('/messages/read', { method: 'POST', body: JSON.stringify({ with: id }) }).catch(() => { });
+        msgState.list.forEach(m => { if (m.from === id && m.to === msgState.me) m.read = true; });
+        saveMsgState(); updateMsgBadge();
+    }
+}
+
+function renderChat() {
+    const box = document.getElementById('chat-msgs');
+    const conv = chatWith === 'all' ? [] : msgState.list.filter(m => m.from === chatWith || m.to === chatWith);
+    box.innerHTML = conv.length ? conv.map(m => `<div class="bubble ${m.from === msgState.me ? 'me' : 'them'}">${escHtml(m.body)}<small>${timeFa(m.at)}</small></div>`).join('')
+        : `<div class="hint" style="text-align:center;margin-top:20px">${chatWith === 'all' ? 'این پیام برای همهٔ کاربران فرستاده می‌شود.' : 'هنوز پیامی رد و بدل نشده است.'}</div>`;
+    box.scrollTop = box.scrollHeight;
+}
+
+function sendMsg() {
+    const el = document.getElementById('chat-text'), body = el.value.trim();
+    if (!body) return;
+    if (!navigator.onLine) { alert('برای ارسال پیام باید به سرور وصل باشید.'); return; }
+    apiFetch('/messages', { method: 'POST', body: JSON.stringify({ to: chatWith, body }) })
+        .then(r => r.json()).then(d => {
+            if (d.status !== 'success') { alert('❌ ' + (d.message || 'پیام ارسال نشد.')); return; }
+            el.value = '';
+            if (chatWith === 'all') { alert(`✅ پیام برای ${fmt(d.count)} نفر ارسال شد.`); return; }
+            pollMessages(false);
+        }).catch(() => alert('❌ اتصال به سرور برقرار نشد؛ پیام ارسال نشد.'));
+}
+
+function closeChat(silent) {
+    chatWith = null;
+    document.getElementById('chat-box').hidden = true;
+    document.getElementById('msg-list-box').hidden = false;
+    document.getElementById('msg-title').textContent = 'پیام‌ها';
+    document.getElementById('msg-sub').textContent = 'گفتگو با مدیر و همکاران';
+    if (!silent) renderContacts();
+}
+function msgBack() {
+    if (chatWith !== null) { closeChat(); return; }
+    if (history.state && history.state.pvMsgs) history.back();
+    else document.getElementById('msg-view').hidden = true;
+}
+window.addEventListener('popstate', () => { chatWith = null; document.getElementById('msg-view').hidden = true; });
+
+updateMsgBadge();
+setTimeout(() => pollMessages(), 3000);
+setInterval(() => pollMessages(), 30000);
+window.addEventListener('online', () => pollMessages());

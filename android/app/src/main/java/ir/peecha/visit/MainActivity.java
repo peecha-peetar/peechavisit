@@ -153,6 +153,17 @@ public class MainActivity extends Activity {
     private class NativeHttp {
         private final ExecutorService pool = Executors.newFixedThreadPool(3);
 
+        // برند، مدل، نسخهٔ اندروید و نسخهٔ اپ — همراه هر درخواست به سرور فرستاده می‌شود
+        @JavascriptInterface
+        public String deviceInfo() {
+            String app = "";
+            try { app = getPackageManager().getPackageInfo(getPackageName(), 0).versionName; }
+            catch (Exception ignored) { }
+            String brand = Build.MANUFACTURER == null ? "" : Build.MANUFACTURER;
+            return (brand.isEmpty() ? "" : brand.substring(0, 1).toUpperCase() + brand.substring(1) + " ")
+                    + Build.MODEL + " · Android " + Build.VERSION.RELEASE + " · app " + app;
+        }
+
         @JavascriptInterface
         public void request(String id, String method, String url, String headersJson,
                             String body, int timeoutMs) {

@@ -192,3 +192,14 @@ window.alert = msg => { pvDialog(msg); };
 function pvConfirm(msg, okText = 'بله', cancelText = 'انصراف') {
     return pvDialog(msg, [{ text: cancelText, value: false }, { text: okText, primary: true, value: true }]);
 }
+
+// ══════════════════════════════════════════
+// اطلاعات دستگاه — همراه هر درخواست (هدر X-Device، URL-encode شده)
+// ══════════════════════════════════════════
+function pvDevice() {
+    try { if (window.PeechaNative && window.PeechaNative.deviceInfo) return window.PeechaNative.deviceInfo(); } catch { }
+    const ua = navigator.userAgent || '';
+    const m = ua.match(/Android ([\d.]+); ([^;)]+)/);
+    return m ? `${m[2].trim()} · Android ${m[1]} · web` : ua.slice(0, 120);
+}
+const pvDeviceHeader = () => encodeURIComponent(pvDevice());

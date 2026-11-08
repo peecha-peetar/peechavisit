@@ -369,6 +369,9 @@ if __name__ == "__main__":
         create_database()
         create_tables()
         alter_existing_tables()
+        import audit
+        audit.ensure_schema()           # پیام‌ها، لاگ ورود، توضیحات و دستگاه
+        log("✅ جدول‌های پیام و لاگ")
         show_summary()
 
         print("🎉 راه‌اندازی با موفقیت انجام شد!")

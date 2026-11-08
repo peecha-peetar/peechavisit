@@ -1,5 +1,6 @@
 # app.py - پیچا ویزیت | Flask API v3.0 (ایمن)
-import hashlib, os, base64
+import hashlib, os, base64, re
+from urllib.parse import unquote
 from datetime import datetime, timedelta
 from functools import wraps
 from flask import Flask, request, jsonify
@@ -15,6 +16,7 @@ from config import NETWORK, SECURITY, PATHS
 from db import get_conn, TRACKING_DB, SALES_DB
 from auth import verify_login
 from mobile_rules import effective_rules
+import audit
 
 SECRET_KEY    = SECURITY["SESSION_SECRET"]
 SESSION_HOURS = SECURITY["SESSION_HOURS"]
@@ -125,7 +127,8 @@ def setup_tables():
             )
         """)
         cur.close(); conn.close()
-        print("✅ جدول submitted_uids آماده")
+        audit.ensure_schema()       # پیام‌ها، لاگ، توضیحات و دستگاه
+        print("✅ جدول‌ها آماده")
     except Exception as e:
         print(f"❌ خطا: {e}")
 
@@ -142,6 +145,35 @@ def user_app_settings(visitor_id):
         return row[0] if row else None
     except Exception:
         return None
+
+
+def client_device() -> str:
+    """دستگاه کاربر: هدر X-Device از اپ (برند، مدل، اندروید) یا خلاصهٔ User-Agent"""
+    # اپ مقدار را URL-encode می‌فرستد (هدر HTTP فقط حروف لاتین می‌پذیرد)
+    dev = unquote(request.headers.get('X-Device') or '').strip()
+    if not dev:
+        ua = request.headers.get('User-Agent', '')
+        m = re.search(r'\(Linux; Android ([\d.]+); ([^;)]+)', ua)
+        dev = f"{m.group(2).strip()} · Android {m.group(1)}" if m else ua[:120]
+    return dev[:200]
+
+
+def log(event, detail=None, visitor_id=None, username=None):
+    u = getattr(request, 'current_user', None) or {}
+    audit.log_event('app', event, visitor_id or u.get('visitor_id'), username or u.get('username'),
+                    request.headers.get('X-Forwarded-For', request.remote_addr), client_device(), detail)
+
+
+def set_extra(cur, table, row_id, description=None):
+    """دستگاه و توضیحات ثبت جدید (اگر ستون‌ها نباشند، بی‌صدا رد می‌شود)"""
+    try:
+        if row_id is None:
+            cur.execute("SELECT @@IDENTITY")
+            row_id = cur.fetchone()[0]
+        cur.execute(f"UPDATE {table} SET device=?{', description=?' if description is not None else ''} WHERE id=?",
+                    (client_device(), *([description[:1000]] if description is not None else []), int(row_id)))
+    except Exception as e:
+        print(f"⚠️ set_extra {table}: {e}")
 
 
 def gps_rules():
@@ -217,9 +249,11 @@ def login():
 
         res = verify_login(username, password)
         if not res["ok"]:
+            log('login_failed', res["error"], username=username)
             return jsonify({"status": "error", "message": res["error"]}), res["status"]
 
         user  = res["user"]
+        log('login', visitor_id=user["id"], username=username)
         token = generate_token(user["id"], username)
         return jsonify({
             "status":  "success",
@@ -275,6 +309,7 @@ def sync_data():
 
         cur.close(); conn.close()
         print(f"✅ sync-data | {len(customers)} مشتری | {len(articles)} کالا")
+        log('sync', f"{len(customers)} مشتری، {len(articles)} کالا")
         return jsonify({"status":"success",
                         "customers":customers,
                         "articles":articles,
@@ -334,6 +369,79 @@ def my_report():
     except Exception as e:
         print(f"❌ my-report error: {e}")
         return jsonify({"status":"error","message":"دریافت گزارش از سرور ممکن نشد"}), 500
+
+
+# ══════════════════════════════════════════
+# ۲-ج. پیام‌ها — مدیر ↔ ویزیتور و ویزیتورها با هم
+# ══════════════════════════════════════════
+@app.route('/api/contacts', methods=['GET'])
+@require_auth
+def contacts():
+    me = request.current_user['visitor_id']
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute("""SELECT id, full_name, ISNULL(role,'visitor') FROM visitors
+                   WHERE is_active=1 AND id<>? ORDER BY CASE WHEN role='admin' THEN 0 ELSE 1 END, full_name""", (me,))
+    rows = [{"id": r[0], "name": r[1], "role": r[2]} for r in cur.fetchall()]
+    cur.close(); conn.close()
+    return jsonify({"status": "success", "contacts": rows}), 200
+
+
+@app.route('/api/messages', methods=['GET'])
+@require_auth
+def messages_list():
+    me = request.current_user['visitor_id']
+    try:
+        after = int(request.args.get('after', 0))
+    except ValueError:
+        after = 0
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute("""SELECT TOP 300 m.id, m.sender_id, m.recipient_id, m.body,
+                          CONVERT(VARCHAR(19), m.created_at, 120), m.read_at, s.full_name
+                   FROM messages m LEFT JOIN visitors s ON s.id = m.sender_id
+                   WHERE (m.sender_id=? OR m.recipient_id=?) AND m.id>?
+                   ORDER BY m.id DESC""", (me, me, after))
+    msgs = [{"id": r[0], "from": r[1], "to": r[2], "body": r[3], "at": r[4], "read": r[5] is not None,
+             "from_name": r[6]} for r in cur.fetchall()][::-1]
+    cur.close(); conn.close()
+    return jsonify({"status": "success", "me": me, "messages": msgs}), 200
+
+
+@app.route('/api/messages', methods=['POST'])
+@require_auth
+def messages_send():
+    me = request.current_user['visitor_id']
+    data = request.json or {}
+    body = (data.get('body') or '').strip()[:2000]
+    to = data.get('to')
+    if not body:
+        return jsonify({"status": "error", "message": "متن پیام خالی است"}), 400
+    conn = get_conn(); cur = conn.cursor()
+    if to == 'all':
+        cur.execute("SELECT id FROM visitors WHERE is_active=1 AND id<>?", (me,))
+        targets = [r[0] for r in cur.fetchall()]
+    else:
+        try:
+            targets = [int(to)]
+        except (TypeError, ValueError):
+            cur.close(); conn.close()
+            return jsonify({"status": "error", "message": "گیرندهٔ پیام مشخص نیست"}), 400
+    for t in targets:
+        cur.execute("INSERT INTO messages (sender_id, recipient_id, body) VALUES (?,?,?)", (me, t, body))
+    conn.commit(); cur.close(); conn.close()
+    log('message', f"به {'همه' if to == 'all' else to}")
+    return jsonify({"status": "success", "message": "پیام ارسال شد", "count": len(targets)}), 200
+
+
+@app.route('/api/messages/read', methods=['POST'])
+@require_auth
+def messages_read():
+    me = request.current_user['visitor_id']
+    other = (request.json or {}).get('with')
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute("UPDATE messages SET read_at=GETDATE() WHERE recipient_id=? AND sender_id=? AND read_at IS NULL",
+                (me, other))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({"status": "success"}), 200
 
 
 # ══════════════════════════════════════════
@@ -404,8 +512,10 @@ def submit_visit():
             """, (visitor_id, customer_code, visit_date, visit_time,
                   latitude, longitude, selfie_path, description))
 
+        set_extra(cur, 'visits', None)
         mark_uid_done(cur, uid)
         conn.commit(); cur.close(); conn.close()
+        log('visit', customer_code)
         print(f"✅ visit | user={visitor_id} | cust={customer_code}")
         return jsonify({"status":"success","message":"ویزیت ثبت شد"}), 200
 
@@ -469,8 +579,10 @@ def submit_order():
                 VALUES (?,?,?,?)
             """, (order_id, item['code'], item['qty'], item['price']))
 
+        set_extra(cur, 'orders', order_id, (data.get('order_note') or '').strip())
         mark_uid_done(cur, order_uid)
         conn.commit(); cur.close(); conn.close()
+        log('order', f"{customer_code} · {total:,.0f}")
         print(f"✅ order | user={visitor_id} | cust={customer_code} | total={total}")
         return jsonify({"status":"success","message":"سفارش ثبت شد"}), 200
 
@@ -557,8 +669,11 @@ def submit_payment():
                   pay_type, amount, tr_tracking or check_number or '',
                   latitude, longitude))
 
+        set_extra(cur, 'payments', None,
+                  (pay_info.get('description') or pay_info.get('cash_desc') or '').strip())
         mark_uid_done(cur, pay_uid)
         conn.commit(); cur.close(); conn.close()
+        log('payment', f"{customer_code} · {pay_type} · {amount:,.0f}")
         print(f"✅ payment | user={visitor_id} | {pay_type} | {amount}")
         return jsonify({"status":"success","message":"دریافت مالی ثبت شد"}), 200
 

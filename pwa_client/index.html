@@ -22,6 +22,7 @@
         <h1>پیچا ویزیت</h1>
         <p>PeechaVisit</p>
     </div>
+    <button type="button" class="icon-btn msg-btn" onclick="openMsgs()" aria-label="پیام‌ها">💬<span class="msg-badge" id="msg-badge"></span></button>
     <button type="button" class="icon-btn" onclick="openReport()">گزارش من</button>
     <button type="button" class="icon-btn" onclick="pvConfirm('از حساب خارج می‌شوید؟', 'خروج').then(y => y && logout())" aria-label="خروج">خروج</button>
 </header>
@@ -113,6 +114,9 @@
 
         <div class="basket" id="basket-body"></div>
         <div class="basket-total price-field" id="basket-total"></div>
+
+        <label class="field-label" for="order-note">توضیحات سفارش</label>
+        <textarea id="order-note" rows="2" placeholder="اختیاری — مثلاً زمان یا شرایط تحویل"></textarea>
     </section>
 
     <!-- ── دریافت ── -->
@@ -130,10 +134,7 @@
         <input type="number" id="pay-amount" inputmode="numeric" placeholder="مبلغ به ریال">
 
         <!-- نقدی -->
-        <div class="pay-section active" id="cash-section">
-            <label class="field-label" for="cash-desc">توضیحات</label>
-            <input type="text" id="cash-desc" placeholder="اختیاری">
-        </div>
+        <div class="pay-section active" id="cash-section"></div>
 
         <!-- چک -->
         <div class="pay-section" id="check-section">
@@ -202,6 +203,9 @@
             <input type="hidden" id="transfer-image-b64">
             <div class="success-msg" id="transfer-img-ok">عکس رسید ثبت شد ✓</div>
         </div>
+
+        <label class="field-label" for="cash-desc">توضیحات دریافت</label>
+        <textarea id="cash-desc" rows="2" placeholder="اختیاری"></textarea>
     </section>
 
     <footer class="app-footer">
@@ -248,6 +252,29 @@
         <div class="hint" id="rep-stamp" style="text-align:center;padding-bottom:16px"></div>
     </main>
 </div>
+
+<!-- ── پیام‌ها ── -->
+<div class="report-view" id="msg-view" hidden>
+    <header class="app-header">
+        <button type="button" class="icon-btn" onclick="msgBack()">بازگشت</button>
+        <div class="header-text">
+            <h1 id="msg-title">پیام‌ها</h1>
+            <p id="msg-sub">گفتگو با مدیر و همکاران</p>
+        </div>
+    </header>
+    <main class="container" id="msg-list-box">
+        <div class="rep-list" id="msg-contacts"></div>
+        <div class="hint" id="msg-stamp" style="text-align:center;margin-top:10px"></div>
+    </main>
+    <div class="chat" id="chat-box" hidden>
+        <div class="chat-msgs" id="chat-msgs"></div>
+        <div class="chat-input">
+            <textarea id="chat-text" rows="1" placeholder="پیام خود را بنویسید..."></textarea>
+            <button type="button" class="btn btn-primary" onclick="sendMsg()">ارسال</button>
+        </div>
+    </div>
+</div>
+<div class="pv-toast" id="pv-toast" hidden></div>
 
 <div class="submit-wrap">
     <button class="btn btn-primary btn-submit" id="submit-btn" onclick="submitIntegratedForm()">

@@ -10,6 +10,16 @@ from config import APP, SECURITY
 from auth import verify_login
 from db import get_conn
 import perms as P
+import audit
+
+
+def _log(source, event, user=None, username=None, detail=None):
+    try:
+        ip = getattr(st.context, "ip_address", None)
+        ua = (st.context.headers or {}).get("User-Agent", "")[:200]
+    except Exception:
+        ip, ua = None, ""
+    audit.log_event(source, event, (user or {}).get("id"), (user or {}).get("username") or username, ip, ua, detail)
 
 _KEY = "pv_admin"
 
@@ -48,7 +58,7 @@ def current_admin() -> dict | None:
     return info
 
 
-def _login_form(title, icon, subtitle, check):
+def _login_form(title, icon, subtitle, check, source):
     st.markdown(_LOGIN_CSS % {"c1": APP["PRIMARY_COLOR"]}, unsafe_allow_html=True)
     _, mid, _ = st.columns([1, 1.15, 1])
     with mid:
@@ -74,7 +84,9 @@ def _login_form(title, icon, subtitle, check):
                     st.stop()
                 if not err:
                     st.session_state[_KEY] = {**res["user"], "at": time.time()}
+                    _log(source, "login", res["user"])
                     st.rerun()
+                _log(source, "login_failed", username=u, detail=err)
                 st.error(err)
     st.stop()
 
@@ -84,7 +96,7 @@ def require_admin(title: str, icon: str = "🔐") -> dict:
     if admin and admin.get("role") == "admin":
         return admin
     _login_form(title, icon, "ورود ویژهٔ مدیر سیستم",
-                lambda u: None if u["role"] == "admin" else "این حساب دسترسی مدیر ندارد")
+                lambda u: None if u["role"] == "admin" else "این حساب دسترسی مدیر ندارد", "admin")
 
 
 def require_dashboard(title: str, icon: str = "📊") -> dict:
@@ -104,7 +116,7 @@ def require_dashboard(title: str, icon: str = "📊") -> dict:
             if p["access"]:
                 return {**user, "role": row[0], "perms": p}
         st.session_state.pop(_KEY, None)
-    _login_form(title, icon, "ورود به داشبورد", check)
+    _login_form(title, icon, "ورود به داشبورد", check, "dashboard")
 
 
 def logout() -> None:

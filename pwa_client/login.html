@@ -223,7 +223,7 @@ async function doLogin() {
 
         const res = await fetch(`${API}/login`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-Device': pvDeviceHeader() },
             body: JSON.stringify({ username, password }),
             signal: controller.signal
         });
