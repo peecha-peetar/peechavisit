@@ -1,4 +1,4 @@
-# dashboard.py - پیچا ویزیت | داشبورد v6
+# dashboard.py - پیچا ویزیت | داشبورد v7
 # ════════════════════════════════════════════════
 # اجرا:  streamlit run dashboard.py --server.port 8501
 # هر «توقف» روی نقشه = یک ویزیت (+ سفارش و دریافتی که همان لحظه ثبت شده)
@@ -13,6 +13,7 @@ import folium
 import jdatetime
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 from PIL import Image
 from folium.plugins import MarkerCluster
 from streamlit_folium import st_folium
@@ -24,6 +25,7 @@ from config import APP
 from db import get_conn, SALES_DB
 from panel_auth import require_admin, logout
 from ui_font import font_css
+import report
 
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.realpath(os.path.join(BASE_DIR, "static"))
@@ -42,12 +44,12 @@ st.markdown(f"""
 [data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"], [data-testid="collapsedControl"] {{ display:none !important; }}
 p, label, .stMarkdown, .stCaption, .stAlert {{ direction:rtl; text-align:right; }}
 .pv-title {{ font-size:19px; font-weight:800; color:{C1}; line-height:1.3; padding-top:4px; }}
-.pv-range {{ font-size:12px; color:#6b7686; }}
 .kpis {{ display:flex; flex-wrap:wrap; gap:8px; margin:4px 0 12px; }}
 .kpi {{ background:#fff; border:1px solid #e3e7ef; border-radius:10px; padding:6px 12px;
         font-size:13px; color:#495057; white-space:nowrap; }}
 .kpi b {{ font-size:15px; color:#17202e; margin-left:4px; }}
 .kpi i {{ font-style:normal; color:#6b7686; }}
+.kpi.f {{ background:#fff6e0; border-color:#ffe3a3; }}
 .legend {{ display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px; font-size:12px; }}
 .legend span {{ display:inline-flex; align-items:center; gap:5px; background:#fff; border:1px solid #e3e7ef;
                 border-radius:20px; padding:2px 10px; }}
@@ -55,14 +57,38 @@ p, label, .stMarkdown, .stCaption, .stAlert {{ direction:rtl; text-align:right; 
 /* روز/ماه/سال در موبایل هم کنار هم بمانند */
 [class*="st-key-jp_"] [data-testid="stHorizontalBlock"] {{ flex-wrap:nowrap !important; gap:6px !important; }}
 [class*="st-key-jp_"] [data-testid="stColumn"] {{ min-width:0 !important; width:auto !important; flex:1 1 0 !important; }}
-.dlg-head {{ font-size:18px; font-weight:800; color:#17202e; }}
-.dlg-meta {{ font-size:13px; color:#6b7686; margin:2px 0 8px; }}
-.chip {{ display:inline-block; border-radius:20px; padding:2px 10px; font-size:12px; font-weight:600; margin-left:4px; }}
-.sec {{ font-size:15px; font-weight:800; margin:14px 0 6px; padding-top:10px; border-top:1px solid #eef0f4; }}
-.kv {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:8px; }}
+/* وقتی پنجره‌ای باز است، منوی بالا رویش نماند */
+body:has([data-testid="stDialog"]) [data-testid="stPopoverBody"] {{ display:none !important; }}
+/* پنجرهٔ جزئیات */
+.dlg-kind {{ display:inline-block; border-radius:20px; padding:2px 12px; font-size:12px; font-weight:700; }}
+.dlg-head {{ font-size:20px; font-weight:800; color:#17202e; margin-top:6px; }}
+.dlg-amount {{ font-size:22px; font-weight:800; margin:2px 0; }}
+.dlg-meta {{ font-size:13px; color:#6b7686; margin:2px 0 10px; }}
+.sec {{ font-size:15px; font-weight:800; margin:6px 0 8px; }}
+.box {{ background:#fff; border:1px solid #e3e7ef; border-radius:12px; padding:12px 14px; margin-bottom:10px; }}
+.muted {{ color:#868e96; font-size:13px; }}
+.kv {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:8px; }}
 .kv div {{ background:#f6f7fa; border-radius:8px; padding:6px 10px; }}
 .kv small {{ display:block; font-size:11px; color:#6b7686; }}
 .kv b {{ font-size:14px; color:#17202e; font-weight:600; }}
+.itm {{ width:100%; border-collapse:collapse; font-size:13px; }}
+.itm th {{ text-align:right; color:#6b7686; font-weight:600; border-bottom:1px solid #e3e7ef; padding:5px 4px; }}
+.itm td {{ border-bottom:1px solid #f1f3f5; padding:6px 4px; }}
+.itm tfoot td {{ font-weight:800; border-bottom:0; }}
+/* گالری بند انگشتی + بزرگ‌نمایی با کلیک */
+.gal {{ display:flex; flex-wrap:wrap; gap:10px; margin:4px 0 12px; }}
+.gal figure {{ margin:0; width:132px; }}
+.gal .th img {{ width:132px; height:96px; object-fit:cover; border-radius:10px; border:1px solid #dfe3ea;
+               cursor:zoom-in; display:block; }}
+.gal figcaption {{ font-size:12px; color:#6b7686; text-align:center; margin-top:3px; }}
+.gal .lbt {{ display:none; }}
+.gal .lb {{ display:none; position:fixed; inset:0; z-index:100000; background:rgba(10,12,20,.88);
+           align-items:center; justify-content:center; flex-direction:column; }}
+.gal .lbt:checked ~ .lb {{ display:flex; }}
+.gal .lb img {{ max-width:92vw; max-height:84vh; border-radius:8px; cursor:zoom-out; }}
+.gal .lb span {{ color:#fff; margin-top:8px; font-size:14px; }}
+.gal .nophoto {{ width:132px; height:96px; border-radius:10px; border:1px dashed #ced4da; color:#adb5bd;
+                display:flex; align-items:center; justify-content:center; font-size:12px; text-align:center; padding:4px; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -101,6 +127,10 @@ def hhmm(t) -> str:
     return fa(str(t or "")[:5]) or "—"
 
 
+def esc(s) -> str:
+    return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def img_file(rel) -> str | None:
     """مسیر ذخیره‌شده در دیتابیس (/static/...) → فایل روی دیسک (فقط داخل پوشهٔ static)"""
     if not rel or str(rel).strip() in ("", "None", "nan"):
@@ -109,24 +139,43 @@ def img_file(rel) -> str | None:
     return p if p.startswith(STATIC_DIR + os.sep) and os.path.isfile(p) else None
 
 
-@st.cache_data(show_spinner=False, max_entries=2000)
-def thumb_b64(path: str, mtime: float) -> str:
+@st.cache_data(show_spinner=False, max_entries=3000)
+def img_b64(path: str, mtime: float, box: tuple) -> str:
     with Image.open(path) as im:
         im = im.convert("RGB")
-        im.thumbnail((220, 150))
+        im.thumbnail(box)
         buf = io.BytesIO()
-        im.save(buf, "JPEG", quality=70)
+        im.save(buf, "JPEG", quality=82 if box[0] > 400 else 70)
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
-def thumb_tag(rel) -> str:
+def img_src(rel, box=(220, 150)) -> str | None:
     p = img_file(rel)
     if not p:
-        return ""
+        return None
     try:
-        return f"<img src='data:image/jpeg;base64,{thumb_b64(p, os.path.getmtime(p))}'>"
+        return "data:image/jpeg;base64," + img_b64(p, os.path.getmtime(p), box)
     except Exception:
-        return ""
+        return None
+
+
+def gallery(images, uid) -> str:
+    """[(مسیر, عنوان)] → بند انگشتی‌ها؛ کلیک = بزرگ‌نمایی، کلیک دوباره = بستن"""
+    out = []
+    for i, (rel, cap) in enumerate(images):
+        th = img_src(rel, (300, 220))
+        if not th:
+            out.append(f"<figure><div class='nophoto'>{'عکس پیدا نشد' if rel else 'بدون عکس'}</div>"
+                       f"<figcaption>{cap}</figcaption></figure>")
+            continue
+        big = img_src(rel, (1600, 1600))
+        k = f"lb_{uid}_{i}"
+        out.append(f"<figure><input type='checkbox' id='{k}' class='lbt'>"
+                   f"<label for='{k}' class='th'><img src='{th}' alt='{cap}'></label>"
+                   f"<figcaption>{cap}</figcaption>"
+                   f"<label for='{k}' class='lb'><img src='{big}' alt='{cap}'><span>{cap} — برای بستن کلیک کنید</span></label>"
+                   f"</figure>")
+    return "<div class='gal'>" + "".join(out) + "</div>" if out else ""
 
 
 def read_sql(sql, params=()):
@@ -184,17 +233,16 @@ def load_data(g0: str, g1: str, vid: int | None):
         LEFT JOIN {SALES}.customer c ON c.C_Code = p.customer_code
         WHERE p.payment_date BETWEEN ? AND ? {vf.format(a='p')}
         ORDER BY p.payment_date, p.payment_time""", prm)
-    return visits, orders, pays
-
-
-@st.cache_data(ttl=60, show_spinner=False)
-def load_items(order_id: int):
-    return read_sql(f"""
-        SELECT ISNULL(CAST(a.A_Name AS NVARCHAR(200)), oi.article_code) AS name, oi.article_code AS code,
+    items = read_sql(f"""
+        SELECT oi.order_id, oi.article_code AS code,
+               ISNULL(CAST(a.A_Name AS NVARCHAR(200)), oi.article_code) AS name,
                CAST(oi.quantity AS FLOAT) AS qty, CAST(oi.price AS FLOAT) AS price
         FROM order_items oi
+        JOIN orders o ON o.id = oi.order_id
         LEFT JOIN {SALES}.article a ON a.A_Code = oi.article_code
-        WHERE oi.order_id=? ORDER BY oi.id""", (order_id,))
+        WHERE o.order_date BETWEEN ? AND ? {vf.format(a='o')}
+        ORDER BY oi.order_id, oi.id""", prm)
+    return visits, orders, pays, items
 
 
 def build_stops(visits, orders, pays):
@@ -214,8 +262,6 @@ def build_stops(visits, orders, pays):
                 stops.append(s)
             s[field].append(r.to_dict())
     stops.sort(key=lambda s: (str(s["d"]), str(s["t"])))
-    for i, s in enumerate(stops, 1):
-        s["n"] = i
     return stops
 
 
@@ -291,108 +337,255 @@ else:
     j0, j1 = jdatetime.date.fromgregorian(date=g0), jdatetime.date.fromgregorian(date=g1)
 
 try:
-    visits, orders, pays = load_data(g0.isoformat(), g1.isoformat(), sel_vid)
+    visits, orders, pays, items = load_data(g0.isoformat(), g1.isoformat(), sel_vid)
 except Exception as e:
     st.error(f"❌ خطای دیتابیس: {e}")
     st.stop()
-stops = build_stops(visits, orders, pays)
+all_stops = build_stops(visits, orders, pays)
+
+# ── فیلتر مشتری و کالا (گزینه‌ها از داده‌های همین بازه) ──
+cust_names = {}
+for s in all_stops:
+    cust_names.setdefault(str(s["customer_code"]), s["customer"])
+prod_names = dict(zip(items["code"].astype(str), items["name"])) if len(items) else {}
+
+fc, fp = st.columns(2)
+sel_cust = fc.multiselect("مشتری", sorted(cust_names, key=lambda c: cust_names[c]),
+                          format_func=lambda c: f"{cust_names[c]} ({fa(c)})", placeholder="همهٔ مشتریان")
+sel_prod = fp.multiselect("کالا", sorted(prod_names, key=lambda c: prod_names[c]),
+                          format_func=lambda c: f"{prod_names[c]} ({fa(c)})", placeholder="همهٔ کالاها",
+                          help="فقط سفارش‌هایی که این کالاها را دارند (و ویزیت/دریافتِ همان توقف) نمایش داده می‌شوند.")
+
+items_by_order = {}
+for it in items.to_dict("records"):
+    items_by_order.setdefault(int(it["order_id"]), []).append(it)
+
+stops = []
+for s in all_stops:
+    if sel_cust and str(s["customer_code"]) not in sel_cust:
+        continue
+    if sel_prod:
+        ords = [o for o in s["orders"]
+                if any(str(i["code"]) in sel_prod for i in items_by_order.get(int(o["id"]), []))]
+        if not ords:
+            continue
+        s = {**s, "orders": ords}
+    stops.append(s)
+for i, s in enumerate(stops, 1):
+    s["n"] = i
 stop_by_n = {s["n"]: s for s in stops}
+
+f_visits = [s for s in stops if s["visit"] is not None]
+f_orders = [(s, o) for s in stops for o in s["orders"]]
+f_pays = [(s, p) for s in stops for p in s["pays"]]
+order_sum = sum(float(o["total"] or 0) for _, o in f_orders)
+pay_sum = sum(float(p["amount"] or 0) for _, p in f_pays)
+
+# خلاصهٔ کالاها (فقط کالاهای فیلترشده، اگر فیلتر کالا فعال است)
+prod_sum = {}
+for _, o in f_orders:
+    for it in items_by_order.get(int(o["id"]), []):
+        if sel_prod and str(it["code"]) not in sel_prod:
+            continue
+        r = prod_sum.setdefault(str(it["code"]), {"name": it["name"], "qty": 0.0, "amount": 0.0, "orders": set()})
+        r["qty"] += float(it["qty"] or 0)
+        r["amount"] += float(it["qty"] or 0) * float(it["price"] or 0)
+        r["orders"].add(int(o["id"]))
 
 range_txt = (f"{fa(j0.strftime('%Y/%m/%d'))}" if g0 == g1
              else f"از {fa(j0.strftime('%Y/%m/%d'))} تا {fa(j1.strftime('%Y/%m/%d'))}")
+filt_txt = []
+if sel_cust:
+    filt_txt.append("مشتری: " + "، ".join(cust_names[c] for c in sel_cust))
+if sel_prod:
+    filt_txt.append("کالا: " + "، ".join(prod_names[c] for c in sel_prod))
 st.markdown(
     f"<div class='kpis'>"
     f"<span class='kpi'><i>{range_txt} · {sel_vname}</i></span>"
-    f"<span class='kpi'><b>{fa(len(visits))}</b>ویزیت</span>"
-    f"<span class='kpi'><b>{fa(visits['customer_code'].nunique() if len(visits) else 0)}</b>مشتری</span>"
-    f"<span class='kpi'><b>{fa(len(orders))}</b>سفارش · {money(orders['total'].sum() if len(orders) else 0)}</span>"
-    f"<span class='kpi'><b>{fa(len(pays))}</b>دریافت · {money(pays['amount'].sum() if len(pays) else 0)}</span>"
+    + "".join(f"<span class='kpi f'><i>{esc(t)}</i></span>" for t in filt_txt)
+    + f"<span class='kpi'><b>{fa(len(f_visits))}</b>ویزیت</span>"
+    f"<span class='kpi'><b>{fa(len({s['customer_code'] for s in stops}))}</b>مشتری</span>"
+    f"<span class='kpi'><b>{fa(len(f_orders))}</b>سفارش · {money(order_sum)}</span>"
+    f"<span class='kpi'><b>{fa(len(f_pays))}</b>دریافت · {money(pay_sum)}</span>"
     f"</div>", unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════
-# خروجی اکسل و خروج
+# گزارش: Excel / PDF / چاپ  (همه از نتیجهٔ فیلترشده)
 # ══════════════════════════════════════════════
-def excel_bytes() -> bytes:
-    out = io.BytesIO()
-    with pd.ExcelWriter(out, engine="xlsxwriter") as w:
-        sheets = {
-            "ویزیت‌ها": pd.DataFrame([{
-                "تاریخ": jdate(r.d), "ساعت": str(r.t)[:5], "ویزیتور": r.visitor, "مشتری": r.customer,
-                "کد مشتری": r.customer_code, "توضیحات": r.descr, "عرض": r.lat, "طول": r.lng}
-                for r in visits.itertuples()]),
-            "سفارش‌ها": pd.DataFrame([{
-                "شماره": r.id, "تاریخ": jdate(r.d), "ساعت": str(r.t)[:5], "ویزیتور": r.visitor,
-                "مشتری": r.customer, "کد مشتری": r.customer_code, "جمع (ریال)": float(r.total or 0)}
-                for r in orders.itertuples()]),
-            "دریافت‌ها": pd.DataFrame([{
-                "تاریخ": jdate(r.d), "ساعت": str(r.t)[:5], "ویزیتور": r.visitor, "مشتری": r.customer,
-                "کد مشتری": r.customer_code, "نوع": r.ptype, "مبلغ (ریال)": float(r.amount or 0),
-                "شماره چک": r.check_number, "صیادی": r.check_sayyadi, "سررسید": jdate(r.check_due) if r.check_due else "",
-                "حساب مقصد": r.tr_account, "پیگیری": r.tr_tracking or r.tracking}
-                for r in pays.itertuples()]),
-        }
-        items = []
-        for r in orders.itertuples():
-            for it in load_items(int(r.id)).itertuples():
-                items.append({"شماره سفارش": r.id, "مشتری": r.customer, "کالا": it.name, "کد کالا": it.code,
-                              "تعداد": it.qty, "قیمت واحد": it.price, "جمع": it.qty * it.price})
-        sheets["اقلام سفارش"] = pd.DataFrame(items)
-        head = w.book.add_format({"bold": True, "bg_color": C1, "font_color": "white", "border": 1})
-        for name, df in sheets.items():
-            if df.empty:
-                df = pd.DataFrame({"": ["در این بازه موردی نیست"]})
-            df.to_excel(w, sheet_name=name, index=False)
-            ws = w.sheets[name]
-            ws.right_to_left()
-            for i, col in enumerate(df.columns):
-                ws.write(0, i, col, head)
-                ws.set_column(i, i, 18, w.book.add_format({"num_format": "#,##0"}) if "ریال" in str(col) or col in ("قیمت واحد", "جمع") else None)
-    return out.getvalue()
+def report_data():
+    meta = [("بازه", range_txt), ("ویزیتور", sel_vname)]
+    if sel_cust:
+        meta.append(("مشتری", "، ".join(cust_names[c] for c in sel_cust)))
+    if sel_prod:
+        meta.append(("کالا", "، ".join(prod_names[c] for c in sel_prod)))
+    meta.append(("جمع", f"{fa(len(f_visits))} ویزیت · {fa(len(f_orders))} سفارش ({money(order_sum)}) · "
+                       f"{fa(len(f_pays))} دریافت ({money(pay_sum)})"))
+    sec_v = [{"#": s["n"], "تاریخ": jdate(s["d"]), "ساعت": str(s["t"])[:5], "مشتری": s["customer"],
+              "ویزیتور": s["visitor"],
+              "ثبت‌ها": " + ".join(x for x in ["سفارش" if s["orders"] else "", "دریافت" if s["pays"] else ""] if x),
+              "توضیحات": s["visit"]["descr"]} for s in f_visits]
+    sec_o = [{"شماره": int(o["id"]), "تاریخ": jdate(o["d"]), "ساعت": str(o["t"])[:5], "مشتری": s["customer"],
+              "ویزیتور": s["visitor"],
+              "اقلام": "، ".join(f"{i['name']} × {i['qty']:g}" for i in items_by_order.get(int(o["id"]), [])),
+              "مبلغ (ریال)": float(o["total"] or 0)} for s, o in f_orders]
+    sec_p = [{"تاریخ": jdate(p["d"]), "ساعت": str(p["t"])[:5], "مشتری": s["customer"], "ویزیتور": s["visitor"],
+              "نوع": p["ptype"], "مبلغ (ریال)": float(p["amount"] or 0),
+              "جزئیات": (f"چک {p['check_number']} · صیادی {p['check_sayyadi']} · سررسید {jdate(p['check_due'])}"
+                         if p["ptype"] == "چک" else
+                         f"حساب {p['tr_account']} · پیگیری {p['tr_tracking'] or p['tracking']}"
+                         if p["ptype"] == "حواله" else "")} for s, p in f_pays]
+    sec_k = [{"کالا": r["name"], "کد": c, "تعداد": r["qty"], "سفارش‌ها": len(r["orders"]), "مبلغ (ریال)": r["amount"]}
+             for c, r in sorted(prod_sum.items(), key=lambda x: -x[1]["amount"])]
+    sections = [
+        ("ویزیت‌ها", ["#", "تاریخ", "ساعت", "مشتری", "ویزیتور", "ثبت‌ها", "توضیحات"], sec_v),
+        ("سفارش‌ها", ["شماره", "تاریخ", "ساعت", "مشتری", "ویزیتور", "اقلام", "مبلغ (ریال)"], sec_o),
+        ("دریافت‌ها", ["تاریخ", "ساعت", "مشتری", "ویزیتور", "نوع", "مبلغ (ریال)", "جزئیات"], sec_p),
+        ("خلاصهٔ کالاها", ["کالا", "کد", "تعداد", "سفارش‌ها", "مبلغ (ریال)"], sec_k),
+    ]
+    return meta, sections
 
+
+@st.cache_data(show_spinner=False, max_entries=20)
+def cached_excel(meta, sections):
+    return report.to_excel(meta, sections)
+
+
+@st.cache_data(show_spinner=False, max_entries=20)
+def cached_pdf(meta, sections):
+    return report.to_pdf(meta, sections)
+
+
+meta, sections = report_data()
+fname = f"PeechaVisit_{j0.strftime('%Y%m%d')}_{j1.strftime('%Y%m%d')}"
 
 with h_menu.popover("☰ منو", use_container_width=True):
-    st.download_button("📥 خروجی Excel", data=excel_bytes(), use_container_width=True,
-                       file_name=f"PeechaVisit_{j0.strftime('%Y%m%d')}_{j1.strftime('%Y%m%d')}.xlsx",
-                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    st.download_button("📥 Excel", data=cached_excel(meta, sections), file_name=f"{fname}.xlsx",
+                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                       use_container_width=True, on_click="ignore")
+    try:
+        st.download_button("📄 PDF", data=cached_pdf(meta, sections), file_name=f"{fname}.pdf",
+                           mime="application/pdf", use_container_width=True, on_click="ignore")
+    except Exception as e:
+        st.caption(f"PDF ساخته نشد: {e}")
+    if st.button("🖨️ چاپ", use_container_width=True):
+        st.session_state["want_print"] = True
+    st.caption("خروجی‌ها همان نتیجهٔ فیلترشدهٔ فعلی هستند.")
+    st.divider()
     st.caption(f"👤 {ADMIN['name']} (@{ADMIN['username']})")
     if st.button("🚪 خروج", use_container_width=True):
         logout()
 
 
 # ══════════════════════════════════════════════
-# جزئیات یک توقف (پنجره)
+# پنجره‌ها: جزئیات و چاپ
 # ══════════════════════════════════════════════
 def _closed():
     # پاک شدن انتخاب نقشه و جدول تا کلیک دوباره روی همان مورد هم کار کند
     st.session_state["ui_ver"] = st.session_state.get("ui_ver", 0) + 1
+    st.session_state.pop("want_print", None)
 
 
-def kv(items) -> str:
+def kv(rows) -> str:
     return "<div class='kv'>" + "".join(
-        f"<div><small>{k}</small><b>{v if v not in (None, '') else '—'}</b></div>" for k, v in items) + "</div>"
+        f"<div><small>{k}</small><b>{v if v not in (None, '') else '—'}</b></div>" for k, v in rows) + "</div>"
 
 
-def show_image(rel, caption):
-    p = img_file(rel)
-    if p:
-        st.image(p, caption=caption, width=320)
-    elif rel:
-        st.caption(f"🖼️ {caption}: فایل عکس روی سرور پیدا نشد ({rel})")
+def stop_images(s):
+    imgs = []
+    if s["visit"] is not None:
+        imgs.append((s["visit"]["selfie"], "سلفی ویزیت"))
+    for p in s["pays"]:
+        if p["ptype"] == "چک":
+            imgs.append((p["check_img"], "عکس چک"))
+        elif p["ptype"] == "حواله":
+            imgs.append((p["tr_img"], "رسید حواله"))
+    return imgs
+
+
+def order_html(o) -> str:
+    its = items_by_order.get(int(o["id"]), [])
+    if not its:
+        return "<div class='muted'>اقلامی ثبت نشده است.</div>"
+    rows = ""
+    for i in its:
+        qty = fa(f"{i['qty']:g}")
+        rows += (f"<tr><td>{esc(i['name'])}<div class='muted'>کد {fa(i['code'])}</div></td><td>{qty}</td>"
+                 f"<td>{money(i['price'])}</td><td>{money(i['qty'] * i['price'])}</td></tr>")
+    return (f"<table class='itm'><thead><tr><th>کالا</th><th>تعداد</th><th>قیمت واحد</th><th>جمع</th></tr></thead>"
+            f"<tbody>{rows}</tbody><tfoot><tr><td colspan='3'>جمع سفارش</td><td>{money(o['total'])}</td></tr></tfoot></table>")
+
+
+def pay_html(p) -> str:
+    if p["ptype"] == "چک":
+        rows = [("شماره چک", fa(p["check_number"])), ("شماره صیادی", fa(p["check_sayyadi"])),
+                ("سررسید", jdate(p["check_due"]))]
+    elif p["ptype"] == "حواله":
+        rows = [("حساب / کارت مقصد", f"<span dir='ltr'>{fa(p['tr_account'])}</span>"),
+                ("شماره پیگیری", fa(p["tr_tracking"] or p["tracking"]))]
+    else:
+        rows = [("نوع", "نقدی")]
+    return (f"<div class='dlg-amount' style='color:{KIND_COLOR['pay']};font-size:17px'>{p['ptype']} — {money(p['amount'])}</div>"
+            + kv(rows))
+
+
+KIND_LABEL = {"visit": ("ویزیت", "#edf1ff"), "order": ("سفارش", "#f3edff"), "pay": ("دریافت", "#e6f6ef")}
 
 
 @st.dialog("جزئیات", width="large", on_dismiss=_closed)
-def show_stop(s):
-    chips = []
-    if s["visit"] is not None:
-        chips.append(f"<span class='chip' style='background:#edf1ff;color:{KIND_COLOR['visit']}'>ویزیت</span>")
-    if s["orders"]:
-        chips.append(f"<span class='chip' style='background:#f3edff;color:{KIND_COLOR['order']}'>سفارش</span>")
-    if s["pays"]:
-        chips.append(f"<span class='chip' style='background:#e6f6ef;color:{KIND_COLOR['pay']}'>دریافت</span>")
-    st.markdown(f"<div class='dlg-head'>{fa(s['n'])}. {s['customer']} {''.join(chips)}</div>"
-                f"<div class='dlg-meta'>{jdate(s['d'])} · ساعت {hhmm(s['t'])} · {s['visitor']} · کد مشتری {fa(s['customer_code'])}</div>",
-                unsafe_allow_html=True)
+def show_stop(n: int, focus: str, ref: int | None):
+    s = stop_by_n[n]
+    lbl, bg = KIND_LABEL[focus]
+    focus_order = next((o for o in s["orders"] if int(o["id"]) == ref), None) if focus == "order" else None
+    focus_pay = next((p for p in s["pays"] if int(p["id"]) == ref), None) if focus == "pay" else None
+
+    # ── سرتیتر: همان چیزی که رویش کلیک شده ──
+    head = s["customer"]
+    if focus_order:
+        head = f"سفارش شمارهٔ {fa(focus_order['id'])} — {s['customer']}"
+    elif focus_pay:
+        head = f"دریافت {focus_pay['ptype']} — {s['customer']}"
+    st.markdown(
+        f"<span class='dlg-kind' style='background:{bg};color:{KIND_COLOR[focus]}'>{lbl}</span>"
+        f"<div class='dlg-head'>{esc(head)}</div>"
+        + (f"<div class='dlg-amount' style='color:{KIND_COLOR['order']}'>{money(focus_order['total'])}</div>" if focus_order else "")
+        + (f"<div class='dlg-amount' style='color:{KIND_COLOR['pay']}'>{money(focus_pay['amount'])}</div>" if focus_pay else "")
+        + f"<div class='dlg-meta'>{jdate(s['d'])} · ساعت {hhmm(s['t'])} · {esc(s['visitor'])} · کد مشتری {fa(s['customer_code'])}</div>",
+        unsafe_allow_html=True)
+
+    # ── عکس‌ها (بند انگشتی؛ کلیک = بزرگ‌نمایی) ──
+    imgs = stop_images(s)
+    if focus_pay:      # عکسِ همین دریافت اول بیاید
+        own = focus_pay["check_img"] if focus_pay["ptype"] == "چک" else focus_pay["tr_img"]
+        imgs.sort(key=lambda x: x[0] != own)
+    if imgs:
+        st.markdown(gallery(imgs, f"{n}_{focus}"), unsafe_allow_html=True)
+
+    # ── بدنه بر اساس نوع ردیف ──
+    if focus_order:
+        st.markdown(f"<div class='box'><div class='sec'>📦 اقلام سفارش</div>{order_html(focus_order)}</div>",
+                    unsafe_allow_html=True)
+    elif focus_pay:
+        st.markdown(f"<div class='box'><div class='sec'>💰 جزئیات دریافت</div>{pay_html(focus_pay)}</div>",
+                    unsafe_allow_html=True)
+
+    others_o = [o for o in s["orders"] if o is not focus_order]
+    others_p = [p for p in s["pays"] if p is not focus_pay]
+    if focus == "visit" or others_o or others_p:
+        if focus != "visit":
+            st.markdown("<div class='sec' style='margin-top:4px'>🔗 در همین ویزیت</div>", unsafe_allow_html=True)
+        c_o, c_p = st.columns(2)
+        with c_o:
+            body = "".join(f"<div class='muted'>سفارش شمارهٔ {fa(o['id'])}</div>{order_html(o)}" for o in others_o) \
+                or "<div class='muted'>سفارشی ثبت نشده است.</div>"
+            st.markdown(f"<div class='box'><div class='sec'>📦 سفارش</div>{body}</div>", unsafe_allow_html=True)
+        with c_p:
+            body = "".join(pay_html(p) for p in others_p) or "<div class='muted'>دریافتی ثبت نشده است.</div>"
+            st.markdown(f"<div class='box'><div class='sec'>💰 دریافت</div>{body}</div>", unsafe_allow_html=True)
+
+    if s["visit"] is not None and s["visit"]["descr"]:
+        st.markdown(f"<div class='box'><div class='sec'>📝 توضیحات ویزیت</div>{esc(s['visit']['descr'])}</div>",
+                    unsafe_allow_html=True)
 
     lat, lng = s.get("lat"), s.get("lng")
     if lat and lng:
@@ -400,47 +593,17 @@ def show_stop(s):
         b1.link_button("🗺️ گوگل‌مپ", f"https://www.google.com/maps?q={lat},{lng}", use_container_width=True)
         b2.link_button("🧭 نشان", f"https://neshan.org/maps/@{lat},{lng},17z", use_container_width=True)
 
-    if s["visit"] is not None:
-        v = s["visit"]
-        st.markdown("<div class='sec'>📍 ویزیت</div>", unsafe_allow_html=True)
-        st.markdown(kv([("توضیحات", v["descr"] or "—"), ("مختصات", f"<span dir='ltr'>{fa(f'{lat:.5f}, {lng:.5f}')}</span>" if lat else "—")]),
-                    unsafe_allow_html=True)
-        if v["selfie"]:
-            show_image(v["selfie"], "سلفی ویزیتور")
-        else:
-            st.caption("سلفی ثبت نشده است.")
 
-    for o in s["orders"]:
-        st.markdown(f"<div class='sec'>📦 سفارش شمارهٔ {fa(o['id'])} — {money(o['total'])}</div>",
-                    unsafe_allow_html=True)
-        items = load_items(int(o["id"]))
-        if items.empty:
-            st.caption("اقلامی ثبت نشده است.")
-        else:
-            st.dataframe(pd.DataFrame({
-                "جمع": [money(q * p) for q, p in zip(items.qty, items.price)],
-                "قیمت واحد": [money(p) for p in items.price],
-                "تعداد": [fa(f"{q:g}") for q in items.qty],
-                "کالا": items.name,
-            }), hide_index=True, use_container_width=True)
-
-    for p in s["pays"]:
-        st.markdown(f"<div class='sec'>💰 دریافت {p['ptype']} — {money(p['amount'])}</div>", unsafe_allow_html=True)
-        if p["ptype"] == "چک":
-            st.markdown(kv([("شماره چک", fa(p["check_number"])), ("شماره صیادی", fa(p["check_sayyadi"])),
-                            ("سررسید", jdate(p["check_due"]) if p["check_due"] else "—")]), unsafe_allow_html=True)
-            show_image(p["check_img"], "عکس چک")
-        elif p["ptype"] == "حواله":
-            st.markdown(kv([("حساب / کارت مقصد", fa(p["tr_account"])),
-                            ("شماره پیگیری", fa(p["tr_tracking"] or p["tracking"]))]), unsafe_allow_html=True)
-            show_image(p["tr_img"], "عکس رسید حواله")
+@st.dialog("پیش‌نمایش چاپ", width="large", on_dismiss=_closed)
+def show_print():
+    components.html(report.to_html(meta, sections, font_css()), height=640, scrolling=True)
 
 
 # ══════════════════════════════════════════════
 # نقشه + لیست
 # ══════════════════════════════════════════════
 ver = st.session_state.setdefault("ui_ver", 0)
-to_open = None
+to_open = None          # (شمارهٔ توقف, نوع, شناسهٔ سفارش/دریافت)
 col_map, col_list = st.columns([1.55, 1], gap="medium")
 
 with col_map:
@@ -454,8 +617,7 @@ with col_map:
             unsafe_allow_html=True)
 
     m = folium.Map(location=[35.6997, 51.3380], zoom_start=11, control_scale=True, tiles="OpenStreetMap")
-    m.get_root().header.add_child(folium.Element(font_css().replace("<style>", "<style>\n").replace(
-        ".stApp *", "body *") + """
+    m.get_root().header.add_child(folium.Element(font_css().replace(".stApp *", "body *") + """
 <style>
 .leaflet-tooltip.pv-tip { direction:rtl; text-align:right; padding:8px 10px; border-radius:10px;
   border:1px solid #dfe3ea; box-shadow:0 6px 18px rgba(16,24,40,.16); font-family:Vazirmatn,Tahoma,sans-serif; }
@@ -494,9 +656,11 @@ with col_map:
             badges += f"<span class='b' style='background:#f3edff;color:{KIND_COLOR['order']}'>سفارش {money(sum(o['total'] or 0 for o in s['orders']))}</span>"
         for p in s["pays"]:
             badges += f"<span class='b' style='background:#e6f6ef;color:{KIND_COLOR['pay']}'>{p['ptype']} {money(p['amount'])}</span>"
-        tip = (f"<div class='h'>{fa(s['n'])}. {s['customer']}</div>"
-               f"<div class='m'>{jdate(s['d'])} · {hhmm(s['t'])} · {s['visitor']}</div>"
-               f"{thumb_tag(s['visit']['selfie']) if s['visit'] is not None else ''}{badges}"
+        th = img_src(s["visit"]["selfie"]) if s["visit"] is not None else None
+        img_tag = f"<img src='{th}'>" if th else ""
+        tip = (f"<div class='h'>{fa(s['n'])}. {esc(s['customer'])}</div>"
+               f"<div class='m'>{jdate(s['d'])} · {hhmm(s['t'])} · {esc(s['visitor'])}</div>"
+               f"{img_tag}{badges}"
                f"<div class='f'>برای جزئیات کلیک کنید</div>")
         color = vcolor[int(s["visitor_id"])] if len(visitor_ids) > 1 else KIND_COLOR[s["kind"]]
         folium.Marker(
@@ -513,47 +677,52 @@ with col_map:
     out = st_folium(m, key=f"map_{ver}", height=620, use_container_width=True,
                     returned_objects=["last_object_clicked_tooltip"])
     tip_txt = (out or {}).get("last_object_clicked_tooltip") or ""
-    mt = re.match(r"\s*([0-9۰-۹]+)\.", tip_txt.translate(_EN) if tip_txt else "")
-    if mt:
-        to_open = int(mt.group(1).translate(_EN))
+    mt = re.match(r"\s*([0-9]+)\.", tip_txt.translate(_EN))
+    if mt and int(mt.group(1)) in stop_by_n:
+        n_ = int(mt.group(1))
+        to_open = (n_, stop_by_n[n_]["kind"], None)
     if not stops:
-        st.info("در این بازه ثبتی وجود ندارد. بازه یا ویزیتور را تغییر دهید.")
+        st.info("با این فیلترها موردی وجود ندارد. بازه، ویزیتور، مشتری یا کالا را تغییر دهید.")
 
 
-def table(rows, cols, key, height=540):
+def table(rows, cols, key, height=540, selectable=True):
     if not rows:
-        st.caption("موردی در این بازه نیست.")
+        st.caption("موردی نیست.")
         return None
     df = pd.DataFrame(rows)[cols[::-1]]          # ستون اول در سمت راست دیده شود
-    ev = st.dataframe(df.drop(columns=["_n"]) if "_n" in df else df, hide_index=True,
-                      use_container_width=True, height=height, key=key,
+    if not selectable:
+        st.dataframe(df, hide_index=True, use_container_width=True, height=height)
+        return None
+    ev = st.dataframe(df, hide_index=True, use_container_width=True, height=height, key=key,
                       on_select="rerun", selection_mode="single-row")
     sel = ev.selection.rows if ev and ev.selection else []
-    return rows[sel[0]]["_n"] if sel else None
+    return rows[sel[0]]["_open"] if sel else None
 
 
 with col_list:
-    t_v, t_o, t_p = st.tabs([f"ویزیت‌ها ({fa(len(visits))})", f"سفارش‌ها ({fa(len(orders))})",
-                             f"دریافت‌ها ({fa(len(pays))})"])
+    t_v, t_o, t_p, t_k = st.tabs([f"ویزیت‌ها ({fa(len(f_visits))})", f"سفارش‌ها ({fa(len(f_orders))})",
+                                  f"دریافت‌ها ({fa(len(f_pays))})", f"کالاها ({fa(len(prod_sum))})"])
     with t_v:
-        rows = [{"_n": s["n"], "#": fa(s["n"]), "مشتری": s["customer"], "ویزیتور": s["visitor"],
+        rows = [{"_open": (s["n"], "visit", None), "#": fa(s["n"]), "مشتری": s["customer"], "ویزیتور": s["visitor"],
                  "تاریخ": jdate(s["d"]), "ساعت": hhmm(s["t"]),
                  "ثبت‌ها": " + ".join(x for x in ["سفارش" if s["orders"] else "", "دریافت" if s["pays"] else ""] if x)}
-                for s in stops if s["visit"] is not None]
-        n = table(rows, ["#", "مشتری", "ویزیتور", "تاریخ", "ساعت", "ثبت‌ها", "_n"], f"tv_{ver}")
-        to_open = n or to_open
+                for s in f_visits]
+        to_open = table(rows, ["#", "مشتری", "ویزیتور", "تاریخ", "ساعت", "ثبت‌ها"], f"tv_{ver}") or to_open
     with t_o:
-        rows = [{"_n": s["n"], "#": fa(s["n"]), "مشتری": s["customer"], "ویزیتور": s["visitor"],
-                 "تاریخ": jdate(o["d"]), "ساعت": hhmm(o["t"]), "مبلغ": money(o["total"])}
-                for s in stops for o in s["orders"]]
-        n = table(rows, ["#", "مشتری", "ویزیتور", "تاریخ", "ساعت", "مبلغ", "_n"], f"to_{ver}")
-        to_open = n or to_open
+        rows = [{"_open": (s["n"], "order", int(o["id"])), "شماره": fa(o["id"]), "مشتری": s["customer"],
+                 "ویزیتور": s["visitor"], "تاریخ": jdate(o["d"]), "مبلغ": money(o["total"])} for s, o in f_orders]
+        to_open = table(rows, ["شماره", "مشتری", "ویزیتور", "تاریخ", "مبلغ"], f"to_{ver}") or to_open
     with t_p:
-        rows = [{"_n": s["n"], "#": fa(s["n"]), "مشتری": s["customer"], "ویزیتور": s["visitor"],
-                 "تاریخ": jdate(p["d"]), "نوع": p["ptype"], "مبلغ": money(p["amount"])}
-                for s in stops for p in s["pays"]]
-        n = table(rows, ["#", "مشتری", "ویزیتور", "تاریخ", "نوع", "مبلغ", "_n"], f"tp_{ver}")
-        to_open = n or to_open
+        rows = [{"_open": (s["n"], "pay", int(p["id"])), "مشتری": s["customer"], "ویزیتور": s["visitor"],
+                 "تاریخ": jdate(p["d"]), "نوع": p["ptype"], "مبلغ": money(p["amount"])} for s, p in f_pays]
+        to_open = table(rows, ["مشتری", "ویزیتور", "تاریخ", "نوع", "مبلغ"], f"tp_{ver}") or to_open
+    with t_k:
+        rows = [{"کالا": r["name"], "کد": fa(c), "تعداد": fa(f"{r['qty']:g}"), "سفارش": fa(len(r["orders"])),
+                 "مبلغ": money(r["amount"])} for c, r in sorted(prod_sum.items(), key=lambda x: -x[1]["amount"])]
+        table(rows, ["کالا", "کد", "تعداد", "سفارش", "مبلغ"], "tk", selectable=False)
 
-if to_open and to_open in stop_by_n:
-    show_stop(stop_by_n[to_open])
+# فقط یک پنجره در هر اجرا
+if st.session_state.get("want_print"):
+    show_print()
+elif to_open and to_open[0] in stop_by_n:
+    show_stop(*to_open)

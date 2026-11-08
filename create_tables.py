@@ -253,6 +253,7 @@ def alter_existing_tables():
         ("locked_until",   "DATETIME NULL"),
         ("notes",          "NVARCHAR(500) NULL"),
         ("created_at",     "DATETIME NOT NULL DEFAULT GETDATE()"),
+        ("app_settings",   "NVARCHAR(1000) NULL"),   # تنظیمات اختصاصی اپ موبایل (JSON)
     ]
     for col, dtype in visitor_cols:
         cur.execute(f"""

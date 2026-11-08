@@ -10,10 +10,10 @@ app = Flask(__name__)
 # ══════════════════════════════════════════
 # تنظیمات امنیتی
 # ══════════════════════════════════════════
-import config
 from config import NETWORK, SECURITY, PATHS
 from db import get_conn, TRACKING_DB, SALES_DB
 from auth import verify_login
+from mobile_rules import effective_rules
 
 SECRET_KEY    = SECURITY["SESSION_SECRET"]
 SESSION_HOURS = SECURITY["SESSION_HOURS"]
@@ -102,6 +102,11 @@ def setup_tables():
         conn = get_conn(autocommit=True)
         cur = conn.cursor()
         cur.execute("""
+            IF NOT EXISTS (SELECT 1 FROM sys.columns
+                           WHERE object_id=OBJECT_ID('visitors') AND name='app_settings')
+            ALTER TABLE visitors ADD app_settings NVARCHAR(1000) NULL
+        """)
+        cur.execute("""
             IF NOT EXISTS (SELECT * FROM sys.tables WHERE name='submitted_uids')
             CREATE TABLE submitted_uids (
                 uid VARCHAR(100) NOT NULL PRIMARY KEY,
@@ -114,6 +119,18 @@ def setup_tables():
         print(f"❌ خطا: {e}")
 
 setup_tables()
+
+
+def user_app_settings(visitor_id):
+    """JSON تنظیمات اختصاصی کاربر (اگر ستون هنوز ساخته نشده، None)"""
+    try:
+        conn = get_conn(); cur = conn.cursor()
+        cur.execute("SELECT app_settings FROM visitors WHERE id=?", (visitor_id,))
+        row = cur.fetchone()
+        cur.close(); conn.close()
+        return row[0] if row else None
+    except Exception:
+        return None
 
 
 def is_uid_done(cursor, uid):
@@ -205,9 +222,8 @@ def login():
 @app.route('/api/sync-data', methods=['GET'])
 @require_auth
 def sync_data():
-    # تنظیمات اپ موبایل هر بار تازه از settings.json خوانده می‌شود (بدون ری‌استارت)
-    # (config.py قدیمی بدون MOBILE → اپ پیش‌فرض‌های خودش را به کار می‌برد)
-    rules = config.current_settings().get("MOBILE") or {}
+    # تنظیمات اپ: سراسری (تازه از settings.json، بدون ری‌استارت) + تنظیم اختصاصی همین کاربر
+    rules = effective_rules(user_app_settings(request.current_user['visitor_id']))
     step = 'اتصال به دیتابیس فروش'
     try:
         conn = get_conn(SALES_DB); cur = conn.cursor()

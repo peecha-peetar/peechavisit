@@ -19,6 +19,7 @@ from config import APP, SECURITY, DEFAULTS, SETTINGS_FILE
 from db import get_conn, TRACKING_DB, SALES_DB
 from auth import hash_password, is_locked
 from panel_auth import require_admin, logout
+from mobile_rules import LABELS as MOBILE_LABELS, global_rules, user_overrides, dump_overrides
 from ui_font import font_css
 
 C1, C2 = APP["PRIMARY_COLOR"], APP["ACCENT_COLOR"]
@@ -86,6 +87,7 @@ input[type=number] {{ direction:ltr; text-align:left; }}
 .b-off {{ background:#f1f5f9; color:#64748b; }}
 .b-lock {{ background:#ffedd5; color:#c2410c; }}
 .b-me {{ background:#fef9c3; color:#854d0e; }}
+.b-app {{ background:#e0f2fe; color:#075985; }}
 
 /* بخش‌ها */
 .sec-t {{ font-size:15px; font-weight:900; color:{C1}; margin:4px 0 2px; }}
@@ -157,6 +159,7 @@ def ensure_cols():
         ("failed_attempts", "INT NOT NULL DEFAULT 0"),
         ("locked_until", "DATETIME NULL"), ("notes", "NVARCHAR(500) NULL"),
         ("created_at", "DATETIME NOT NULL DEFAULT GETDATE()"),
+        ("app_settings", "NVARCHAR(1000) NULL"),
     ]
     try:
         conn = get_conn(autocommit=True); cur = conn.cursor()
@@ -190,6 +193,7 @@ def load_users() -> pd.DataFrame:
                    ISNULL(v.failed_attempts,0)    AS failed_attempts,
                    v.locked_until,
                    ISNULL(v.notes,'')             AS notes,
+                   ISNULL(v.app_settings,'')      AS app_settings,
                    v.created_at,
                    (SELECT COUNT(*) FROM visits   WHERE visitor_id=v.id) AS n_visits,
                    (SELECT COUNT(*) FROM orders   WHERE visitor_id=v.id) AS n_orders,
@@ -318,6 +322,7 @@ with tab_users:
                 + ("<span class='badge b-on'>فعال</span>" if act else "<span class='badge b-off'>غیرفعال</span>")
                 + (f"<span class='badge b-lock'>🔒 قفل تا {to_jalali(u['locked_until']).split()[-1]}</span>" if locked else "")
                 + ("<span class='badge b-me'>شما</span>" if is_me else "")
+                + ("<span class='badge b-app'>📱 تنظیمات اختصاصی</span>" if user_overrides(u["app_settings"]) else "")
             )
             last_visit = to_jalali(u["last_visit"], with_time=False)
             st.markdown(f"""
@@ -412,6 +417,30 @@ with tab_users:
                                 flash(f"🗑️ کاربر @{uname} حذف شد.")
                                 st.rerun()
 
+                # ── تنظیمات اپ موبایل فقط برای همین کاربر ──
+                glob = global_rules()
+                mine = user_overrides(u["app_settings"])
+                choices = ["پیش‌فرض", "بله", "خیر"]
+                with st.form(f"app_{uid}"):
+                    st.markdown("<div class='sec-t'>📱 تنظیمات اپ برای این کاربر</div>"
+                                "<div class='sec-s'>«پیش‌فرض» = همان تنظیم سراسری (تب تنظیمات). بدون ری‌استارت اعمال می‌شود.</div>",
+                                unsafe_allow_html=True)
+                    cols = st.columns(3)
+                    picked = {}
+                    for i, (k, label) in enumerate(MOBILE_LABELS.items()):
+                        col = cols[i % 3]
+                        cur = "پیش‌فرض" if k not in mine else ("بله" if mine[k] else "خیر")
+                        picked[k] = col.selectbox(
+                            label, choices, index=choices.index(cur), key=f"app_{uid}_{k}",
+                            help=f"پیش‌فرض سراسری: {'بله' if glob.get(k) else 'خیر'}")
+                    save_app = st.form_submit_button("💾 ذخیرهٔ تنظیمات اپ این کاربر")
+                if save_app:
+                    raw = dump_overrides({k: v == "بله" for k, v in picked.items() if v != "پیش‌فرض"})
+                    run_sql("UPDATE visitors SET app_settings=? WHERE id=?", (raw, uid))
+                    flash(f"✅ تنظیمات اپ @{uname} ذخیره شد"
+                          + ("." if raw else " (همه روی پیش‌فرض)."))
+                    st.rerun()
+
 
 # ══════════════════════════════════════════════
 # تب ۲ — کاربر جدید
@@ -503,21 +532,14 @@ with tab_cfg:
             st.markdown("<div class='sec-t'>📱 اپ موبایل ویزیتورها</div>"
                         "<div class='sec-s'>بلافاصله اعمال می‌شود؛ روی گوشی با دکمهٔ «همگام‌سازی» یا باز کردن دوبارهٔ اپ.</div>",
                         unsafe_allow_html=True)
-            m1, m2 = st.columns(2)
-            with m1:
-                m_selfie = st.toggle("📸 سلفی برای ثبت ویزیت اجباری باشد", value=M["REQUIRE_SELFIE"])
-                m_price = st.toggle("💰 قیمت کالا نمایش داده شود", value=M["SHOW_PRICE"])
-                m_stock = st.toggle("📦 موجودی کالا نمایش داده شود", value=M["SHOW_STOCK"])
-            with m2:
-                m_instock = st.toggle("✅ فقط کالاهای دارای موجودی در لیست بیایند", value=M["ONLY_IN_STOCK"])
-                m_oversell = st.toggle("⚠️ سفارش بیشتر از موجودی (یا بدون موجودی) مجاز باشد",
-                                       value=M["ALLOW_OVERSELL"],
-                                       help="خاموش: تعداد سفارش از موجودی بیشتر نمی‌شود")
+            m_cols = st.columns(2)
+            m_vals = {}
+            for i, (k, label) in enumerate(MOBILE_LABELS.items()):
+                m_vals[k] = m_cols[i % 2].toggle(label, value=bool(M.get(k)))
+            st.caption("برای تنظیم جداگانه برای یک ویزیتور: تب «کاربران» ← «ویرایش و عملیات» آن کاربر.")
             save_mobile = st.form_submit_button("💾 ذخیرهٔ تنظیمات اپ موبایل", type="primary")
         if save_mobile:
-            config.save_settings({"MOBILE": {"REQUIRE_SELFIE": m_selfie, "SHOW_PRICE": m_price,
-                                             "SHOW_STOCK": m_stock, "ONLY_IN_STOCK": m_instock,
-                                             "ALLOW_OVERSELL": m_oversell}})
+            config.save_settings({"MOBILE": m_vals})
             flash("✅ تنظیمات اپ موبایل ذخیره شد و از همین حالا اعمال می‌شود.")
             st.rerun()
 
