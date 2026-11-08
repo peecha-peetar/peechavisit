@@ -1,8 +1,13 @@
 # config.py - پیچا ویزیت | تنظیمات مرکزی
 # ════════════════════════════════════════════════
-# فقط این فایل رو ویرایش کنید — بقیه فایل‌ها از اینجا می‌خونن
+# مقادیر پیش‌فرض اینجاست — بقیه فایل‌ها از اینجا می‌خونن
+# تغییرات از «پنل مدیریت ← تنظیمات» در settings.json ذخیره می‌شوند
+# و روی این مقادیر اعمال می‌شوند (settings.json اولویت دارد)
 # بعد از تغییر: سرویس‌ها را ری‌استارت کنید
 # ════════════════════════════════════════════════
+import json as _json
+import os as _os
+import copy as _copy
 
 # ── شبکه و سرور ──
 NETWORK = {
@@ -22,6 +27,11 @@ DATABASES = {
     "SALES_DB":    "dejavuDB1",
     "DRIVER":      "SQL Server",
     "TIMEOUT":     30,
+    # خالی = ورود ویندوزی (Trusted_Connection) — در غیر این صورت ورود SQL
+    "USER":        "",
+    "PASSWORD":    "",
+    # پارامترهای اضافهٔ اتصال، مثلاً "TrustServerCertificate=yes"
+    "EXTRA":       "",
 }
 
 # ── برنامه ──
@@ -57,3 +67,83 @@ GPS = {
     "TIMEOUT_SECONDS":     12,
     "CACHE_SECONDS":       0,
 }
+
+
+# ════════════════════════════════════════════════
+# settings.json — تنظیمات ذخیره‌شده از پنل مدیریت
+# ════════════════════════════════════════════════
+SETTINGS_FILE = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "settings.json")
+
+_SECTIONS = {
+    "NETWORK": NETWORK, "DATABASES": DATABASES, "APP": APP,
+    "SECURITY": SECURITY, "PATHS": PATHS, "GPS": GPS,
+}
+DEFAULTS = _copy.deepcopy(_SECTIONS)
+
+
+def _coerce(default, value):
+    """نوع مقدار ذخیره‌شده را هم‌نوع مقدار پیش‌فرض می‌کند"""
+    if isinstance(default, bool):
+        return value if isinstance(value, bool) else str(value).lower() in ("1", "true", "yes")
+    if isinstance(default, int):
+        return int(value)
+    return str(value)
+
+
+def read_settings_file() -> dict:
+    """محتوای settings.json (فقط بخش‌ها و کلیدهای شناخته‌شده)"""
+    try:
+        with open(SETTINGS_FILE, encoding="utf-8") as f:
+            raw = _json.load(f)
+    except (OSError, ValueError):
+        return {}
+    clean = {}
+    for sec, values in (raw or {}).items():
+        if sec in DEFAULTS and isinstance(values, dict):
+            for k, v in values.items():
+                if k in DEFAULTS[sec]:
+                    try:
+                        clean.setdefault(sec, {})[k] = _coerce(DEFAULTS[sec][k], v)
+                    except (TypeError, ValueError):
+                        pass
+    return clean
+
+
+def current_settings() -> dict:
+    """پیش‌فرض‌ها + settings.json (خواندن تازه از دیسک)"""
+    merged = _copy.deepcopy(DEFAULTS)
+    for sec, values in read_settings_file().items():
+        merged[sec].update(values)
+    return merged
+
+
+def save_settings(changes: dict) -> None:
+    """ذخیرهٔ تغییرات در settings.json — فقط مقادیر متفاوت با پیش‌فرض نگه داشته می‌شوند"""
+    data = read_settings_file()
+    for sec, values in changes.items():
+        for k, v in values.items():
+            if sec not in DEFAULTS or k not in DEFAULTS[sec]:
+                continue
+            v = _coerce(DEFAULTS[sec][k], v)
+            if v == DEFAULTS[sec][k]:
+                data.get(sec, {}).pop(k, None)
+            else:
+                data.setdefault(sec, {})[k] = v
+    data = {s: v for s, v in data.items() if v}
+    tmp = SETTINGS_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        _json.dump(data, f, ensure_ascii=False, indent=2)
+    _os.replace(tmp, SETTINGS_FILE)
+
+
+def reset_settings() -> None:
+    """بازگشت به مقادیر پیش‌فرض"""
+    try:
+        _os.remove(SETTINGS_FILE)
+    except FileNotFoundError:
+        pass
+
+
+# اعمال settings.json روی مقادیر بالا
+for _sec, _values in read_settings_file().items():
+    _SECTIONS[_sec].update(_values)

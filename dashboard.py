@@ -1,6 +1,5 @@
 # dashboard.py - پیچا ویزیت v5.0
 import streamlit as st
-import pyodbc
 import pandas as pd
 import folium
 from streamlit_folium import st_folium
@@ -25,15 +24,15 @@ st.set_page_config(
 )
 
 # ── بارگذاری از config ──
-try:
-    from config import NETWORK, DATABASES, APP, SECURITY
-    SERVER_IP   = NETWORK["SERVER_IP"]
-    SERVER_NAME = NETWORK["SERVER_NAME"]
-    C1          = APP["PRIMARY_COLOR"]
-except ImportError:
-    SERVER_IP   = "10.165.254.180"
-    SERVER_NAME = "SERWIN\\RAD"
-    C1          = "#020025"
+from config import NETWORK, APP
+from db import get_conn, TRACKING_DB
+from panel_auth import require_admin, logout
+SERVER_IP   = NETWORK["SERVER_IP"]
+API_PORT    = NETWORK["FLASK_PORT"]
+C1          = APP["PRIMARY_COLOR"]
+
+# ── ورود مدیر (قبلاً داشبورد بدون رمز برای همه باز بود) ──
+ADMIN = require_admin("داشبورد پیچا ویزیت", "📍")
 
 # ══════════════════════════════════════════════════════
 # CSS
@@ -302,12 +301,9 @@ span[aria-keyshortcuts],
 # ══════════════════════════════════════════════════════
 # توابع
 # ══════════════════════════════════════════════════════
-def qry(sql, params=None, db="tracking"):
+def qry(sql, params=None, db=TRACKING_DB):
     try:
-        conn = pyodbc.connect(
-            f'DRIVER={{SQL Server}};SERVER={SERVER_NAME};'
-            f'DATABASE={db};Trusted_Connection=yes;'
-        )
+        conn = get_conn(db)
         df = pd.read_sql(sql, conn, params=params)
         conn.close()
         return df
@@ -331,7 +327,7 @@ def ct(t):
 
 def img(path):
     if path and str(path).strip() not in ('','None','nan'):
-        return f"http://{SERVER_IP}:5000{path}"
+        return f"http://{SERVER_IP}:{API_PORT}{path}"
     return None
 
 def ensure_cols():
@@ -342,10 +338,7 @@ def ensure_cols():
         ("transfer_image_path","NVARCHAR(500)"),
     ]
     try:
-        conn = pyodbc.connect(
-            f'DRIVER={{SQL Server}};SERVER={SERVER_NAME};'
-            f'DATABASE=tracking;Trusted_Connection=yes;', autocommit=True
-        )
+        conn = get_conn(autocommit=True)
         cur = conn.cursor()
         for col,dtype in cols:
             try:
@@ -391,18 +384,18 @@ with st.sidebar:
     today_j = jdatetime.date.today()
     months = ["فروردین","اردیبهشت","خرداد","تیر","مرداد","شهریور",
               "مهر","آبان","آذر","دی","بهمن","اسفند"]
-    years = [1403,1404,1405,1406]
+    years = list(range(today_j.year-3, today_j.year+2))
 
     st.markdown("<div style='color:#c5cae9;font-size:11px;padding:0 20px 4px'>🔹 از تاریخ</div>", unsafe_allow_html=True)
     a,b,c = st.columns([3,3,2])
-    with a: sy = st.selectbox("سال از",years,index=2,key="sy",label_visibility="collapsed")
+    with a: sy = st.selectbox("سال از",years,index=years.index(today_j.year),key="sy",label_visibility="collapsed")
     with b: sm = st.selectbox("ماه از",range(1,13),index=today_j.month-1,key="sm",
                                format_func=lambda x:months[x-1],label_visibility="collapsed")
     with c: sd = st.selectbox("روز از",range(1,32),index=0,key="sd",label_visibility="collapsed")
 
     st.markdown("<div style='color:#c5cae9;font-size:11px;padding:4px 20px'>🔸 تا تاریخ</div>", unsafe_allow_html=True)
     d,e,f_ = st.columns([3,3,2])
-    with d: ey = st.selectbox("سال تا",years,index=2,key="ey",label_visibility="collapsed")
+    with d: ey = st.selectbox("سال تا",years,index=years.index(today_j.year),key="ey",label_visibility="collapsed")
     with e: em = st.selectbox("ماه تا",range(1,13),index=today_j.month-1,key="em",
                                format_func=lambda x:months[x-1],label_visibility="collapsed")
     with f_: ed = st.selectbox("روز تا",range(1,32),index=today_j.day-1,key="ed",label_visibility="collapsed")
@@ -430,6 +423,8 @@ with st.sidebar:
     st.markdown("<div style='padding:4px 16px 16px'>", unsafe_allow_html=True)
     if st.button("🔄 بروزرسانی", use_container_width=True):
         st.rerun()
+    if st.button(f"🚪 خروج ({ADMIN['username']})", use_container_width=True):
+        logout()
     st.markdown("</div><hr>", unsafe_allow_html=True)
     st.markdown(f"""
     <div style='padding:8px 20px 20px;font-size:11px;color:#7986cb;text-align:center'>
@@ -990,9 +985,7 @@ if has_detail and detail_col is not None:
                 unsafe_allow_html=True
             )
             try:
-                conn_it = pyodbc.connect(
-                    f'DRIVER={{SQL Server}};SERVER={SERVER_NAME};DATABASE=tracking;Trusted_Connection=yes;'
-                )
+                conn_it = get_conn()
                 its = pd.read_sql("""
                     SELECT ISNULL(a.A_Name,oi.article_code) AS nm,
                            CAST(oi.quantity AS FLOAT) AS qty,

@@ -1,5 +1,5 @@
 # app.py - پیچا ویزیت | Flask API v3.0 (ایمن)
-import hashlib, os, base64, secrets, pyodbc
+import hashlib, os, base64
 from datetime import datetime, timedelta
 from functools import wraps
 from flask import Flask, request, jsonify
@@ -10,19 +10,12 @@ app = Flask(__name__)
 # ══════════════════════════════════════════
 # تنظیمات امنیتی
 # ══════════════════════════════════════════
-try:
-    from config import NETWORK, SECURITY, PATHS, DATABASES
-    SERVER_NAME   = NETWORK["SERVER_NAME"]
-    SERVER_IP     = NETWORK["SERVER_IP"]
-    SECRET_KEY    = SECURITY["SESSION_SECRET"]
-    SESSION_HOURS = SECURITY["SESSION_HOURS"]
-    ALLOWED_ORIGIN= f"http://{NETWORK['SERVER_IP']}:{NETWORK['PWA_PORT']}"
-except ImportError:
-    SERVER_NAME   = 'SERWIN\\RAD'   # fallback — config.py را ویرایش کنید
-    SERVER_IP     = '10.165.254.180' # fallback
-    SECRET_KEY    = '37be8db295c2f7bb433d7e176effb94e7905eb13e7421a6abed238821cae2592'
-    SESSION_HOURS = 10
-    ALLOWED_ORIGIN= f"http://{SERVER_IP}:8000"
+from config import NETWORK, SECURITY, PATHS
+from db import get_conn, TRACKING_DB, SALES_DB
+from auth import verify_login
+
+SECRET_KEY    = SECURITY["SESSION_SECRET"]
+SESSION_HOURS = SECURITY["SESSION_HOURS"]
 
 # ✅ CORS فقط برای آدرس مشخص
 CORS(app,
@@ -33,18 +26,9 @@ CORS(app,
 )
 
 # پوشه‌های آپلود
-for folder in ['static/selfies', 'static/checks', 'static/transfers']:
+SELFIES_DIR, CHECKS_DIR, TRANSFERS_DIR = PATHS["SELFIES_DIR"], PATHS["CHECKS_DIR"], PATHS["TRANSFERS_DIR"]
+for folder in [SELFIES_DIR, CHECKS_DIR, TRANSFERS_DIR]:
     os.makedirs(folder, exist_ok=True)
-
-
-# ══════════════════════════════════════════
-# اتصال دیتابیس
-# ══════════════════════════════════════════
-def get_conn(db='tracking'):
-    return pyodbc.connect(
-        f'DRIVER={{SQL Server}};SERVER={SERVER_NAME};'
-        f'DATABASE={db};Trusted_Connection=yes;'
-    )
 
 
 # ══════════════════════════════════════════
@@ -114,11 +98,7 @@ def require_auth(f):
 # ══════════════════════════════════════════
 def setup_tables():
     try:
-        conn = pyodbc.connect(
-            f'DRIVER={{SQL Server}};SERVER={SERVER_NAME};'
-            f'DATABASE=tracking;Trusted_Connection=yes;',
-            autocommit=True
-        )
+        conn = get_conn(autocommit=True)
         cur = conn.cursor()
         cur.execute("""
             IF NOT EXISTS (SELECT * FROM sys.tables WHERE name='submitted_uids')
@@ -194,70 +174,19 @@ def login():
         if not username or not password:
             return jsonify({"status": "error", "message": "نام کاربری و رمز الزامی است"}), 400
 
-        pw_hash = hashlib.sha256(password.encode('utf-8')).hexdigest()
-        conn = get_conn(); cur = conn.cursor()
+        res = verify_login(username, password)
+        if not res["ok"]:
+            return jsonify({"status": "error", "message": res["error"]}), res["status"]
 
-        # بررسی قفل
-        cur.execute("""
-            SELECT id, full_name, ISNULL(role,'visitor'),
-                   ISNULL(failed_attempts,0), locked_until
-            FROM visitors
-            WHERE username=? AND is_active=1
-        """, (username,))
-        row = cur.fetchone()
-
-        if not row:
-            cur.close(); conn.close()
-            # ✅ پیام یکسان برای جلوگیری از user enumeration
-            return jsonify({"status":"error","message":"نام کاربری یا رمز اشتباه است"}), 401
-
-        uid, fullname, role, failed, locked_until = row
-
-        if locked_until and datetime.now() < locked_until:
-            remaining = int((locked_until - datetime.now()).total_seconds() / 60) + 1
-            cur.close(); conn.close()
-            return jsonify({"status":"error",
-                            "message":f"حساب قفل است. {remaining} دقیقه صبر کنید"}), 403
-
-        # بررسی رمز
-        cur.execute("""
-            SELECT id FROM visitors
-            WHERE username=? AND password_hash=? AND is_active=1
-        """, (username, pw_hash))
-
-        if cur.fetchone():
-            # ✅ ریست failed_attempts و ثبت زمان ورود
-            cur.execute("""
-                UPDATE visitors
-                SET failed_attempts=0, locked_until=NULL, last_login=?
-                WHERE username=?
-            """, (datetime.now(), username))
-            conn.commit()
-            cur.close(); conn.close()
-
-            token = generate_token(uid, username)
-            return jsonify({
-                "status":  "success",
-                "message": f"خوش آمدید {fullname}",
-                "token":   token,
-                "user":    {"id": uid, "name": fullname, "role": role, "username": username}
-            }), 200
-        else:
-            new_failed = (failed or 0) + 1
-            lock_time  = None
-            if new_failed >= 5:
-                lock_time = datetime.now() + timedelta(minutes=30)
-            cur.execute("""
-                UPDATE visitors SET failed_attempts=?, locked_until=?
-                WHERE username=?
-            """, (new_failed, lock_time, username))
-            conn.commit(); cur.close(); conn.close()
-
-            if lock_time:
-                msg = "حساب به مدت ۳۰ دقیقه قفل شد."
-            else:
-                msg = f"نام کاربری یا رمز اشتباه است. ({5-new_failed} تلاش باقی)"
-            return jsonify({"status":"error","message":msg}), 401
+        user  = res["user"]
+        token = generate_token(user["id"], username)
+        return jsonify({
+            "status":  "success",
+            "message": f"خوش آمدید {user['name']}",
+            "token":   token,
+            "user":    {"id": user["id"], "name": user["name"],
+                        "role": user["role"], "username": username}
+        }), 200
 
     except Exception as e:
         print(f"Login error: {e}")
@@ -271,7 +200,7 @@ def login():
 @require_auth
 def sync_data():
     try:
-        conn = get_conn('dejavuDB1'); cur = conn.cursor()
+        conn = get_conn(SALES_DB); cur = conn.cursor()
 
         cur.execute("""
             SELECT C_Code, C_Name, latitude, longitude
@@ -340,7 +269,7 @@ def submit_visit():
             cur.close(); conn.close()
             return jsonify({"status":"success","message":"تکراری - زمان"}), 200
 
-        selfie_path = save_image(selfie_b64, 'static/selfies', 'visit',
+        selfie_path = save_image(selfie_b64, SELFIES_DIR, 'visit',
                                  visitor_id, customer_code, visit_date, visit_time)
 
         cur.execute("""
@@ -473,9 +402,9 @@ def submit_payment():
             cur.close(); conn.close()
             return jsonify({"status":"success","message":"تکراری - زمان"}), 200
 
-        check_img_path = save_image(check_img_b64, 'static/checks', 'check',
+        check_img_path = save_image(check_img_b64, CHECKS_DIR, 'check',
                                     visitor_id, customer_code, pay_date, pay_time)
-        tr_img_path    = save_image(tr_img_b64, 'static/transfers', 'transfer',
+        tr_img_path    = save_image(tr_img_b64, TRANSFERS_DIR, 'transfer',
                                     visitor_id, customer_code, pay_date, pay_time)
 
         try:
@@ -492,7 +421,9 @@ def submit_payment():
                   check_number or None, check_sayyadi or None,
                   check_due, check_img_path,
                   tr_account or None, tr_tracking or None, tr_img_path))
-        except Exception:
+        except Exception as e:
+            # جدول قدیمی بدون ستون‌های چک/حواله — create_tables.py را اجرا کنید
+            print(f"⚠️ payments: ثبت جزئیات چک/حواله ناموفق، فقط اطلاعات پایه ذخیره شد: {e}")
             cur.execute("""
                 INSERT INTO payments
                     (visitor_id,customer_code,payment_date,payment_time,
@@ -513,12 +444,8 @@ def submit_payment():
 
 
 if __name__ == '__main__':
-    try:
-        from config import NETWORK
-        debug = NETWORK.get('DEBUG', False)
-        port  = NETWORK.get('FLASK_PORT', 5000)
-    except ImportError:
-        debug = False; port = 5000
+    debug = NETWORK.get('DEBUG', False)
+    port  = NETWORK.get('FLASK_PORT', 5000)
 
     print(f"🚀 PeechaVisit API در حال اجرا روی پورت {port}")
-    app.run(host='0.0.0.0', port=port, debug=debug)
+    app.run(host=NETWORK.get('FLASK_HOST', '0.0.0.0'), port=port, debug=debug)

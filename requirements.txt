@@ -9,7 +9,7 @@ flask-cors>=4.0
 pyodbc>=5.0
 
 # داشبورد و پنل مدیریت  (dashboard.py / admin.py)
-streamlit>=1.30
+streamlit>=1.32
 pandas>=2.0
 
 # نقشه در داشبورد
@@ -18,3 +18,6 @@ streamlit-folium>=0.18
 
 # تاریخ شمسی
 jdatetime>=4.1
+
+# خروجی اکسل در داشبورد
+xlsxwriter>=3.1

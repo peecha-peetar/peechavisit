@@ -28,3 +28,7 @@ static/selfies/*
 !static/transfers/.gitkeep
 !static/selfies/.gitkeep
 dist/
+
+# تنظیمات ذخیره‌شده از پنل مدیریت (شامل کلید امنیتی و رمز دیتابیس)
+settings.json
+settings.json.tmp

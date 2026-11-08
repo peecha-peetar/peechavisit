@@ -5,22 +5,13 @@
 # اگر جدول قبلاً وجود داشته باشد، بدون خطا رد می‌شود
 # ════════════════════════════════════════════════════════
 
-import pyodbc
 from datetime import datetime
-
-# خواندن از config.py
-try:
-    from config import NETWORK
-    SERVER = NETWORK["SERVER_NAME"]
-except ImportError:
-    SERVER = 'SERWIN\\RAD'  # fallback
+from db import get_conn as _db_conn
 
 
 def get_conn(db=None, autocommit=False):
-    cs = f'DRIVER={{SQL Server}};SERVER={SERVER};Trusted_Connection=yes;'
-    if db:
-        cs += f'DATABASE={db};'
-    return pyodbc.connect(cs, autocommit=autocommit)
+    # اتصال از db.py (تنظیمات config.py / settings.json)
+    return _db_conn(db, autocommit=autocommit)
 
 
 def log(msg):

@@ -1,0 +1,9 @@
+# تنظیمات Streamlit برای داشبورد و پنل مدیریت پیچا ویزیت
+[client]
+toolbarMode = "viewer"     # بدون دکمهٔ Deploy و منوی توسعه‌دهنده
+
+[browser]
+gatherUsageStats = false
+
+[server]
+headless = true
