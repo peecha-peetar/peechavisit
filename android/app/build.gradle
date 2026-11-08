@@ -1,0 +1,52 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'ir.peecha.visit'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'ir.peecha.visit'
+        minSdk 24
+        targetSdk 35
+        versionCode 1
+        versionName '2.2.0'
+    }
+
+    // امضای نسخهٔ release از keystore.properties (در گیت قرار نمی‌گیرد)
+    def ksFile = rootProject.file('keystore.properties')
+    if (ksFile.exists()) {
+        def ks = new Properties()
+        ksFile.withInputStream { ks.load(it) }
+        signingConfigs {
+            release {
+                storeFile rootProject.file(ks['storeFile'])
+                storePassword ks['storePassword']
+                keyAlias ks['keyAlias']
+                keyPassword ks['keyPassword']
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (ksFile.exists()) signingConfig signingConfigs.release
+        }
+    }
+
+    // فایل‌های اپ موبایل مستقیماً از pwa_client خوانده می‌شوند (یک منبع واحد)
+    sourceSets {
+        main.assets.srcDirs += ['../../pwa_client']
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.12.1'
+}

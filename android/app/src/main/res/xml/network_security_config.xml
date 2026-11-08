@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- سرور پیچا ویزیت در شبکهٔ داخلی روی http (بدون SSL) کار می‌کند -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

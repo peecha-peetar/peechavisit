@@ -27,3 +27,4 @@ static/selfies/*
 !static/checks/.gitkeep
 !static/transfers/.gitkeep
 !static/selfies/.gitkeep
+dist/

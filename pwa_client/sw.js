@@ -1,7 +1,7 @@
 // sw.js - Service Worker پیچا ویزیت | آفلاین-First v2.0
 'use strict';
 
-const CACHE_NAME  = 'pv-shell-v4';
+const CACHE_NAME  = 'pv-shell-v5';
 const API_PREFIX  = '/api/';
 
 // فایل‌هایی که باید cache بشن (app shell)
@@ -9,7 +9,10 @@ const SHELL_FILES = [
     '/',
     '/index.html',
     '/login.html',
+    '/env.js',
     '/app.js',
+    '/fonts/vazirmatn.css',
+    '/fonts/Vazirmatn-Variable.woff2',
     '/manifest.json',
     '/icon-192.png',
     '/apple-touch-icon.png',

@@ -11,8 +11,7 @@
     <link rel="apple-touch-icon" href="apple-touch-icon.png">
     <link rel="manifest" href="manifest.json">
     <title>پیچا ویزیت | PeechaVisit</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link href="fonts/vazirmatn.css" rel="stylesheet">
     <style>
         :root{
             --primary:#020025;
@@ -380,9 +379,11 @@
     </button>
 </div>
 
+<script src="env.js"></script>
 <script src="app.js"></script>
 <script>
-    if ('serviceWorker' in navigator) {
+    // Service Worker فقط برای وب‌اپ؛ اپ اندروید فایل‌ها را از داخل خودش دارد
+    if (!PV_IS_APP && 'serviceWorker' in navigator) {
         window.addEventListener('load', () => {
             navigator.serviceWorker.register('sw.js').catch(e => console.log('SW خطا:', e));
         });
@@ -390,56 +391,7 @@
     const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
     if (isIOS && !window.matchMedia('(display-mode: standalone)').matches)
         document.getElementById('ios-hint').style.display = 'block';
-
-    // پر کردن سال‌های شمسی
-    function fillJalaliYears() {
-        const curYear = 1405;
-        ['check-due-year','transfer-date-year'].forEach(id => {
-            const sel = document.getElementById(id);
-            for (let y = curYear; y <= curYear + 3; y++) {
-                const o = document.createElement('option');
-                o.value = y; o.textContent = y;
-                sel.appendChild(o);
-            }
-            if (sel) sel.value = curYear;
-        });
-        // روزها
-        ['check-due-day','transfer-date-day'].forEach(id => {
-            const sel = document.getElementById(id);
-            for (let d = 1; d <= 31; d++) {
-                const o = document.createElement('option');
-                o.value = String(d).padStart(2,'0');
-                o.textContent = d;
-                sel.appendChild(o);
-            }
-        });
-        // تاریخ امروز پیش‌فرض
-        setDefaultJalaliDates();
-    }
-
-    function setDefaultJalaliDates() {
-        // تاریخ شمسی امروز تقریبی
-        const now = new Date();
-        // محاسبه ساده شمسی
-        const gYear = now.getFullYear(), gMonth = now.getMonth()+1, gDay = now.getDate();
-        // تبدیل ساده میلادی به شمسی (برای پیش‌فرض)
-        let jYear = gYear - 621;
-        let jMonth = gMonth - 3;
-        if (jMonth <= 0) { jMonth += 12; jYear--; }
-        if (jMonth > 12) { jMonth -= 12; jYear++; }
-        const jMonthStr = String(jMonth).padStart(2,'0');
-
-        ['check-due','transfer-date'].forEach(prefix => {
-            const ySel = document.getElementById(prefix+'-year');
-            const mSel = document.getElementById(prefix+'-month');
-            const dSel = document.getElementById(prefix+'-day');
-            if (ySel) ySel.value = jYear;
-            if (mSel) mSel.value = jMonthStr;
-            if (dSel) dSel.value = String(gDay).padStart(2,'0');
-        });
-    }
-
-    fillJalaliYears();
+    // پر کردن تاریخ‌های شمسی در app.js انجام می‌شود
 </script>
 </body>
 </html>

@@ -9,7 +9,7 @@
     <link rel="apple-touch-icon" href="apple-touch-icon.png">
     <link rel="manifest" href="manifest.json">
     <title>ورود | پیچا ویزیت</title>
-    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+    <link href="fonts/vazirmatn.css" rel="stylesheet">
     <style>
         :root { --primary:#020025; --accent:#4f6ef7; --accent2:#7c3aed; }
         * { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent }
@@ -70,6 +70,34 @@
         .footer-txt a { color:var(--accent); text-decoration:none; font-weight:700 }
         .loading { display:none; text-align:center; padding:8px; color:#64748b; font-size:13px }
         .loading.show { display:block }
+        .server-box {
+            margin-top:18px; border:1.5px dashed #cbd5e1; border-radius:13px;
+            padding:12px 14px; background:#f8fafc;
+        }
+        .server-box summary {
+            cursor:pointer; font-size:12px; font-weight:800; color:#475569;
+            list-style:none; display:flex; justify-content:space-between; align-items:center;
+        }
+        .server-box summary::-webkit-details-marker { display:none }
+        .server-box .srv-cur { font-size:11px; color:#94a3b8; direction:ltr; font-weight:600 }
+        .server-box .srv-body { margin-top:12px }
+        .server-box input {
+            width:100%; padding:11px 12px; border-radius:10px; border:1.5px solid #e2e8f0;
+            font-family:'Vazirmatn',Tahoma,sans-serif; font-size:14px; direction:ltr;
+            text-align:left; outline:none; background:white;
+        }
+        .server-box input:focus { border-color:var(--accent) }
+        .server-box .hint { font-size:11px; color:#94a3b8; margin-top:6px; line-height:1.8 }
+        .srv-btns { display:flex; gap:8px; margin-top:10px }
+        .srv-btns button {
+            flex:1; padding:10px; border-radius:10px; border:1.5px solid var(--accent);
+            background:white; color:var(--accent); font-family:'Vazirmatn',Tahoma,sans-serif;
+            font-size:13px; font-weight:800; cursor:pointer;
+        }
+        .srv-btns button.primary { background:var(--accent); color:white }
+        .srv-status { font-size:12px; margin-top:8px; font-weight:700; display:none }
+        .srv-status.ok  { display:block; color:#15803d }
+        .srv-status.err { display:block; color:#b91c1c }
     </style>
 </head>
 <body>
@@ -108,23 +136,75 @@
         🔑 ورود به سامانه
     </button>
 
+    <details class="server-box" id="server-box">
+        <summary>
+            <span>⚙️ آدرس سرور</span>
+            <span class="srv-cur" id="srv-cur"></span>
+        </summary>
+        <div class="srv-body">
+            <input type="text" id="server-input" inputmode="url" autocapitalize="none"
+                   placeholder="192.168.1.50">
+            <div class="hint">آی‌پی کامپیوتر سرور در شبکه (از دستور ipconfig). پورت پیش‌فرض ۵۰۰۰ است.</div>
+            <div class="srv-btns">
+                <button type="button" onclick="testServer()">🔌 تست اتصال</button>
+                <button type="button" class="primary" onclick="saveServer()">💾 ذخیره</button>
+            </div>
+            <div class="srv-status" id="srv-status"></div>
+        </div>
+    </details>
+
     <div class="footer-txt">
         <a href="https://peecha.ir" target="_blank">🌐 peecha.ir</a>
         &nbsp;|&nbsp; PeechaVisit © ۱۴۰۵
     </div>
 </div>
 
+<script src="env.js"></script>
 <script>
-// ── آدرس API ──
-// hostname رو از URL فعلی می‌گیریم (همون سرور که PWA روشه)
-const _HOST = window.location.hostname;
-const _PORT = 5000;
-const API   = `http://${_HOST}:${_PORT}/api`;
+// ── آدرس API از env.js خوانده می‌شود ──
+console.log('[PeechaVisit] API:', getApiBase());
+console.log('[PeechaVisit] app:', PV_IS_APP, '| online:', navigator.onLine);
 
-// debug - نمایش در console
-console.log('[PeechaVisit] API:', API);
-console.log('[PeechaVisit] hostname:', window.location.hostname);
-console.log('[PeechaVisit] online:', navigator.onLine);
+// ── پنل آدرس سرور ──
+function refreshServerUI() {
+    const base = getServerBase();
+    document.getElementById('srv-cur').textContent = base || 'تنظیم نشده';
+    document.getElementById('server-input').value =
+        localStorage.getItem(PV_SERVER_KEY) ? base.replace(/^http:\/\//, '') : '';
+    // در اپ، تا وقتی سرور تنظیم نشده پنل باز بماند
+    if (!base) document.getElementById('server-box').open = true;
+}
+function showSrvStatus(ok, msg) {
+    const el = document.getElementById('srv-status');
+    el.className = 'srv-status ' + (ok ? 'ok' : 'err');
+    el.textContent = msg;
+}
+async function pingServer(base) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 6000);
+    try {
+        const r = await fetch(`${base}/`, { signal: ctrl.signal });
+        const d = await r.json();
+        return d.status === 'running';
+    } catch { return false; } finally { clearTimeout(t); }
+}
+async function testServer() {
+    const base = normalizeServer(document.getElementById('server-input').value) || getServerBase();
+    if (!base) { showSrvStatus(false, 'آدرس سرور را وارد کنید.'); return; }
+    showSrvStatus(true, '⏳ در حال تست ' + base + ' ...');
+    showSrvStatus(...(await pingServer(base)
+        ? [true,  '✅ سرور در دسترس است.']
+        : [false, '❌ پاسخی دریافت نشد. IP، روشن بودن app.py و فایروال را بررسی کنید.']));
+}
+function saveServer() {
+    const raw = document.getElementById('server-input').value;
+    const s = setServerBase(raw);
+    if (raw.trim() && !s) { showSrvStatus(false, 'آدرس نامعتبر است.'); return; }
+    refreshServerUI();
+    document.getElementById('error-msg').classList.remove('show');
+    showSrvStatus(true, s ? '✅ ذخیره شد: ' + s : '✅ به آدرس پیش‌فرض برگشت.');
+}
+refreshServerUI();
 
 // Enter برای ورود
 document.addEventListener('keydown', e => {
@@ -148,6 +228,13 @@ async function doLogin() {
 
     if (!username || !password) {
         showError('نام کاربری و رمز عبور الزامی است.');
+        return;
+    }
+
+    const API = getApiBase();
+    if (!API) {
+        showError('ابتدا آدرس سرور را در بخش «⚙️ آدرس سرور» تنظیم کنید.');
+        document.getElementById('server-box').open = true;
         return;
     }
 
@@ -179,9 +266,9 @@ async function doLogin() {
                 username: username,
                 loginAt:  Date.now()
             }));
-            // ✅ token → sessionStorage (امنیت)
+            // ✅ token → env.js (وب: sessionStorage | اپ: localStorage)
             if (data.token) {
-                sessionStorage.setItem('pv_token_v2', data.token);
+                PV_TOKEN_STORE.setItem(PV_TOKEN_KEY, data.token);
             }
             window.location.replace('index.html');
         } else {

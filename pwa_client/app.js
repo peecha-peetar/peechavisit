@@ -1,19 +1,18 @@
 // app.js - پیچا ویزیت v4.0 | آفلاین-First
 'use strict';
 
-// آدرس API — همیشه همون سرور که PWA روشه
-const _HOST = window.location.hostname;
-const API   = `http://${_HOST}:5000/api`;
+// آدرس API — از env.js (وب‌اپ: همان سرور PWA | اپ اندروید: آدرس تنظیم‌شده)
+const API = getApiBase();
 console.log('[PeechaVisit] API:', API);
 
 // ══════════════════════════════════════════
 // مدیریت Session — آفلاین-First
 // ──────────────────────────────────────────
 // localStorage  → اطلاعات کاربر (ماندگار، آفلاین کار می‌کنه)
-// sessionStorage → token (امنیت، با بستن مرورگر پاک میشه)
+// PV_TOKEN_STORE → token (env.js: وب‌اپ sessionStorage، اپ اندروید localStorage)
 // ══════════════════════════════════════════
 const LS_KEY     = 'pv_user_v2';   // localStorage
-const SS_KEY     = 'pv_token_v2';  // sessionStorage
+const SS_KEY     = PV_TOKEN_KEY;
 const MAX_DAYS   = 30;             // انقضای session
 
 function setSession(data) {
@@ -22,7 +21,7 @@ function setSession(data) {
         role: data.role, username: data.username,
         loginAt: Date.now()
     }));
-    if (data.token) sessionStorage.setItem(SS_KEY, data.token);
+    if (data.token) PV_TOKEN_STORE.setItem(SS_KEY, data.token);
 }
 
 function getSession() {
@@ -39,10 +38,10 @@ function getSession() {
 
 function clearSession() {
     localStorage.removeItem(LS_KEY);
-    sessionStorage.removeItem(SS_KEY);
+    PV_TOKEN_STORE.removeItem(SS_KEY);
 }
 
-function getToken()       { return sessionStorage.getItem(SS_KEY) || ''; }
+function getToken()       { return PV_TOKEN_STORE.getItem(SS_KEY) || ''; }
 function getVisitorId()   { const s=getSession(); return s?(s.id||1):1; }
 function getVisitorName() { const s=getSession(); return s?(s.name||''):''; }
 
@@ -52,8 +51,8 @@ function getVisitorName() { const s=getSession(); return s?(s.name||''):''; }
 (function checkAuth() {
     const s = getSession();
 
-    // هیچ session‌ای نداریم → login
-    if (!s) {
+    // هیچ session‌ای نداریم یا آدرس سرور اپ تنظیم نشده → login
+    if (!s || !API) {
         window.location.replace('login.html');
         return;
     }
@@ -90,7 +89,7 @@ function apiFetch(endpoint, options = {}) {
         if (res.status === 401) {
             // token منقضی شده ولی session داریم
             // به login میریم تا token جدید بگیریم
-            sessionStorage.removeItem(SS_KEY);
+            PV_TOKEN_STORE.removeItem(SS_KEY);
             window.location.replace('login.html?expired=1');
             throw new Error('TOKEN_EXPIRED');
         }
@@ -210,7 +209,7 @@ function fetchServerData() {
             renderCustomers(allCustomersRaw);
             renderArticles(allArticlesRaw);
         }).catch(err => {
-            if (err.message !== 'احراز هویت منقضی شده')
+            if (err.message !== 'TOKEN_EXPIRED')
                 console.warn('داده از کش محلی بارگذاری میشه');
         });
 }
@@ -429,25 +428,7 @@ function updateSyncCount() {
 // ══════════════════════════════════════════
 // ساخت payment_info با تاریخ شمسی
 // ══════════════════════════════════════════
-function jalaliToGregorian(jy,jm,jd) {
-    jy=parseInt(jy); jm=parseInt(jm); jd=parseInt(jd);
-    if(!jy||!jm||!jd) return null;
-    const jy2=jy-979,jm2=jm-1,jd2=jd-1;
-    let jdn=365*jy2+Math.floor(jy2/4)-Math.floor(jy2/100)+Math.floor(jy2/400);
-    const jmd=[31,31,31,31,31,31,30,30,30,30,30,29];
-    for(let i=0;i<jm2;i++) jdn+=jmd[i];
-    jdn+=jd2; let gdn=jdn+79;
-    let gy=1600+400*Math.floor(gdn/146097); gdn%=146097;
-    let leap=true;
-    if(gdn>=36525){gdn--;gy+=100*Math.floor(gdn/36524);gdn%=36524;
-        if(gdn>=365)gdn++;else leap=false;}
-    gy+=4*Math.floor(gdn/1461); gdn%=1461;
-    if(gdn>=366){leap=false;gdn--;gy+=Math.floor(gdn/365);gdn%=365;}
-    const gmd=[31,leap?29:28,31,30,31,30,31,31,30,31,30,31];
-    let gm=0;
-    for(gm=0;gm<12&&gdn>=gmd[gm];gm++)gdn-=gmd[gm];
-    return `${gy}-${String(gm+1).padStart(2,'0')}-${String(gdn+1).padStart(2,'0')}`;
-}
+// jalaliToGregorian در env.js تعریف شده است
 function getJalaliDate(prefix) {
     const y=document.getElementById(prefix+'-year')?.value;
     const m=document.getElementById(prefix+'-month')?.value;
@@ -511,7 +492,7 @@ function submitIntegratedForm() {
             latitude: lat, longitude: lng,
             description: document.getElementById("visit-desc").value,
             selfie_b64: selfie,
-            client_date: now.toISOString().slice(0,10),
+            client_date: localDateStr(now),
             client_time: now.toTimeString().slice(0,8),
             order_items: currentMode==="order" ? [...orderBasket] : [],
             payment_info: currentMode==="pay" ? buildPaymentInfo() : null
@@ -615,7 +596,7 @@ async function syncLocalDataToServer() {
             await sendToServer(rec);
             deleteQueue(rec.uid); markSent(rec.uid); ok++; updateSyncCount();
         } catch(e) {
-            if (e.message==='احراز هویت منقضی شده') break;
+            if (e.message==='TOKEN_EXPIRED') break;
             fail++;
         }
     }
@@ -654,29 +635,29 @@ function resetForm() {
 // ══════════════════════════════════════════
 // پر کردن سال‌های شمسی
 // ══════════════════════════════════════════
-(function fillJalaliYears() {
-    const curYear = 1405;
+(function fillJalaliDates() {
+    const [jy, jm, jd] = todayJalali();
     ['check-due-year','transfer-date-year'].forEach(id => {
         const sel = document.getElementById(id);
         if (!sel) return;
-        for (let y = curYear; y <= curYear + 3; y++) {
+        [...sel.options].forEach(o => { if (o.value) o.remove(); }); // جلوگیری از گزینهٔ تکراری
+        for (let y = jy - 1; y <= jy + 3; y++) {
             const o = document.createElement('option');
             o.value = y; o.textContent = y; sel.appendChild(o);
         }
-        sel.value = curYear;
+        sel.value = jy;
     });
     ['check-due-day','transfer-date-day'].forEach(id => {
         const sel = document.getElementById(id);
         if (!sel) return;
+        [...sel.options].forEach(o => { if (o.value) o.remove(); }); // جلوگیری از گزینهٔ تکراری
         for (let d = 1; d <= 31; d++) {
             const o = document.createElement('option');
             o.value = String(d).padStart(2,'0'); o.textContent = d; sel.appendChild(o);
         }
+        sel.value = String(jd).padStart(2,'0');
     });
-    // پیش‌فرض ماه امروز
-    const now = new Date();
-    let jm = now.getMonth() + 1 - 3;
-    if (jm <= 0) jm += 12;
+    // پیش‌فرض: تاریخ شمسی امروز
     ['check-due-month','transfer-date-month'].forEach(id => {
         const sel = document.getElementById(id);
         if (sel) sel.value = String(jm).padStart(2,'0');
