@@ -35,10 +35,12 @@ jobs:
 
       - name: Read version
         id: ver
-        shell: pwsh
+        shell: python
         run: |
-          $v = python -c "import ast,re;s=open('config.py',encoding='utf-8').read();print(re.search(r'\"VERSION\":\s*\"([^\"]+)\"',s).group(1))"
-          "version=$v" >> $env:GITHUB_OUTPUT
+          import os, re
+          v = re.search(r'"VERSION":\s*"([^"]+)"', open("config.py", encoding="utf-8").read()).group(1)
+          open(os.environ["GITHUB_OUTPUT"], "a").write(f"version={v}\n")
+          print(v)
 
       - name: Build program (PyInstaller)
         run: pyinstaller --noconfirm --clean packaging/PeechaVisit.spec
