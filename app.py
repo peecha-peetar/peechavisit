@@ -10,6 +10,7 @@ app = Flask(__name__)
 # ══════════════════════════════════════════
 # تنظیمات امنیتی
 # ══════════════════════════════════════════
+import config
 from config import NETWORK, SECURITY, PATHS
 from db import get_conn, TRACKING_DB, SALES_DB
 from auth import verify_login
@@ -107,6 +108,11 @@ def setup_tables():
             ALTER TABLE visitors ADD app_settings NVARCHAR(1000) NULL
         """)
         cur.execute("""
+            IF NOT EXISTS (SELECT 1 FROM sys.columns
+                           WHERE object_id=OBJECT_ID('visits') AND name='gps_accuracy')
+            ALTER TABLE visits ADD gps_accuracy FLOAT NULL
+        """)
+        cur.execute("""
             IF NOT EXISTS (SELECT * FROM sys.tables WHERE name='submitted_uids')
             CREATE TABLE submitted_uids (
                 uid VARCHAR(100) NOT NULL PRIMARY KEY,
@@ -131,6 +137,13 @@ def user_app_settings(visitor_id):
         return row[0] if row else None
     except Exception:
         return None
+
+
+def gps_rules():
+    """حد دقت و مهلت GPS از config (بخش GPS) برای اپ"""
+    g = config.current_settings().get("GPS") or {}
+    return {"GPS_MAX_ACCURACY": int(g.get("MAX_ACCURACY_METERS", 50)),
+            "GPS_TIMEOUT": int(g.get("TIMEOUT_SECONDS", 20))}
 
 
 def is_uid_done(cursor, uid):
@@ -260,10 +273,62 @@ def sync_data():
         return jsonify({"status":"success",
                         "customers":customers,
                         "articles":articles,
-                        "settings":rules}), 200
+                        "settings":{**rules, **gps_rules()}}), 200
     except Exception as e:
         print(f"❌ sync-data error ({step}): {e}")
         return jsonify({"status":"error","message":f"{step}: {e}"}), 500
+
+
+# ══════════════════════════════════════════
+# ۲-ب. گزارش کار خود ویزیتور — نیاز به token
+# ══════════════════════════════════════════
+@app.route('/api/my-report', methods=['GET'])
+@require_auth
+def my_report():
+    vid = request.current_user['visitor_id']
+    try:
+        d0 = datetime.strptime(request.args.get('from', ''), '%Y-%m-%d').date()
+        d1 = datetime.strptime(request.args.get('to', ''), '%Y-%m-%d').date()
+    except ValueError:
+        return jsonify({"status":"error","message":"بازهٔ تاریخ نامعتبر است"}), 400
+    if (d1 - d0).days > 92:
+        return jsonify({"status":"error","message":"بازهٔ گزارش حداکثر سه ماه است"}), 400
+    try:
+        conn = get_conn(); cur = conn.cursor()
+        cust = f"[{SALES_DB}].dbo.customer"
+        cur.execute(f"""
+            SELECT v.visit_date, CONVERT(VARCHAR(5), v.visit_time, 108), v.customer_code,
+                   CAST(c.C_Name AS NVARCHAR(200)), ISNULL(v.description,'')
+            FROM visits v LEFT JOIN {cust} c ON c.C_Code = v.customer_code
+            WHERE v.visitor_id=? AND v.visit_date BETWEEN ? AND ?
+            ORDER BY v.visit_date DESC, v.visit_time DESC""", (vid, d0, d1))
+        visits = [{"date": str(r[0]), "time": r[1], "customer_code": r[2],
+                   "customer": fa_text(r[3]) or r[2], "description": r[4]} for r in cur.fetchall()]
+        cur.execute(f"""
+            SELECT o.id, o.order_date, CONVERT(VARCHAR(5), o.order_time, 108), o.customer_code,
+                   CAST(c.C_Name AS NVARCHAR(200)), o.total_amount,
+                   (SELECT COUNT(*) FROM order_items WHERE order_id=o.id)
+            FROM orders o LEFT JOIN {cust} c ON c.C_Code = o.customer_code
+            WHERE o.visitor_id=? AND o.order_date BETWEEN ? AND ?
+            ORDER BY o.order_date DESC, o.order_time DESC""", (vid, d0, d1))
+        orders = [{"id": r[0], "date": str(r[1]), "time": r[2], "customer_code": r[3],
+                   "customer": fa_text(r[4]) or r[3], "total": float(r[5] or 0), "items": r[6]}
+                  for r in cur.fetchall()]
+        cur.execute(f"""
+            SELECT p.payment_date, CONVERT(VARCHAR(5), p.payment_time, 108), p.customer_code,
+                   CAST(c.C_Name AS NVARCHAR(200)), p.payment_type, p.amount
+            FROM payments p LEFT JOIN {cust} c ON c.C_Code = p.customer_code
+            WHERE p.visitor_id=? AND p.payment_date BETWEEN ? AND ?
+            ORDER BY p.payment_date DESC, p.payment_time DESC""", (vid, d0, d1))
+        pays = [{"date": str(r[0]), "time": r[1], "customer_code": r[2],
+                 "customer": fa_text(r[3]) or r[2], "type": r[4], "amount": float(r[5] or 0)}
+                for r in cur.fetchall()]
+        cur.close(); conn.close()
+        return jsonify({"status":"success", "from": str(d0), "to": str(d1),
+                        "visits": visits, "orders": orders, "payments": pays}), 200
+    except Exception as e:
+        print(f"❌ my-report error: {e}")
+        return jsonify({"status":"error","message":"دریافت گزارش از سرور ممکن نشد"}), 500
 
 
 # ══════════════════════════════════════════
@@ -311,13 +376,28 @@ def submit_visit():
         selfie_path = save_image(selfie_b64, SELFIES_DIR, 'visit',
                                  visitor_id, customer_code, visit_date, visit_time)
 
-        cur.execute("""
-            INSERT INTO visits
-                (visitor_id,customer_code,visit_date,visit_time,
-                 latitude,longitude,selfie_path,description)
-            VALUES (?,?,?,?,?,?,?,?)
-        """, (visitor_id, customer_code, visit_date, visit_time,
-              latitude, longitude, selfie_path, description))
+        accuracy = data.get('accuracy')
+        try:
+            accuracy = round(float(accuracy), 1) if accuracy is not None else None
+        except (TypeError, ValueError):
+            accuracy = None
+        try:
+            cur.execute("""
+                INSERT INTO visits
+                    (visitor_id,customer_code,visit_date,visit_time,
+                     latitude,longitude,selfie_path,description,gps_accuracy)
+                VALUES (?,?,?,?,?,?,?,?,?)
+            """, (visitor_id, customer_code, visit_date, visit_time,
+                  latitude, longitude, selfie_path, description, accuracy))
+        except Exception:
+            # جدول قدیمی بدون ستون gps_accuracy
+            cur.execute("""
+                INSERT INTO visits
+                    (visitor_id,customer_code,visit_date,visit_time,
+                     latitude,longitude,selfie_path,description)
+                VALUES (?,?,?,?,?,?,?,?)
+            """, (visitor_id, customer_code, visit_date, visit_time,
+                  latitude, longitude, selfie_path, description))
 
         mark_uid_done(cur, uid)
         conn.commit(); cur.close(); conn.close()

@@ -22,7 +22,8 @@
         <h1>پیچا ویزیت</h1>
         <p>PeechaVisit</p>
     </div>
-    <button type="button" class="icon-btn" onclick="if (confirm('از حساب خارج می‌شوید؟')) logout()" aria-label="خروج">خروج</button>
+    <button type="button" class="icon-btn" onclick="openReport()">گزارش من</button>
+    <button type="button" class="icon-btn" onclick="pvConfirm('از حساب خارج می‌شوید؟', 'خروج').then(y => y && logout())" aria-label="خروج">خروج</button>
 </header>
 
 <main class="container">
@@ -207,6 +208,46 @@
         <a href="https://peecha.ir" target="_blank">peecha.ir</a> · پیچا ویزیت ۱۴۰۵
     </footer>
 </main>
+
+<!-- ── گزارش کار من (روی صفحه باز می‌شود؛ آفلاین هم صف ارسال را نشان می‌دهد) ── -->
+<div class="report-view" id="report-view" hidden>
+    <header class="app-header">
+        <button type="button" class="icon-btn" onclick="closeReport()">بازگشت</button>
+        <div class="header-text">
+            <h1>گزارش کار من</h1>
+            <p id="rep-sub"></p>
+        </div>
+    </header>
+    <main class="container">
+        <nav class="segmented" id="rep-range">
+            <button type="button" class="menu-btn active" data-r="today" onclick="setRepRange('today')">امروز</button>
+            <button type="button" class="menu-btn" data-r="week" onclick="setRepRange('week')">۷ روز اخیر</button>
+            <button type="button" class="menu-btn" data-r="month" onclick="setRepRange('month')">این ماه</button>
+        </nav>
+        <div class="rep-kpis" id="rep-kpis"></div>
+
+        <section class="card card-always" id="rep-queue-card">
+            <h2 class="card-title">در صف ارسال <span class="sync-badge" id="rep-queue-n" style="display:inline-block">۰</span></h2>
+            <div class="hint" style="margin-top:-6px">این ثبت‌ها روی گوشی ذخیره شده‌اند و با اتصال به سرور ارسال می‌شوند.</div>
+            <div class="rep-list" id="rep-queue"></div>
+            <button type="button" class="btn btn-primary" id="rep-send" onclick="syncLocalDataToServer()">ارسال صف به سرور</button>
+        </section>
+
+        <section class="card card-always">
+            <h2 class="card-title">ویزیت‌ها</h2>
+            <div class="rep-list" id="rep-visits"></div>
+        </section>
+        <section class="card card-always">
+            <h2 class="card-title">سفارش‌ها</h2>
+            <div class="rep-list" id="rep-orders"></div>
+        </section>
+        <section class="card card-always">
+            <h2 class="card-title">دریافت‌ها</h2>
+            <div class="rep-list" id="rep-pays"></div>
+        </section>
+        <div class="hint" id="rep-stamp" style="text-align:center;padding-bottom:16px"></div>
+    </main>
+</div>
 
 <div class="submit-wrap">
     <button class="btn btn-primary btn-submit" id="submit-btn" onclick="submitIntegratedForm()">

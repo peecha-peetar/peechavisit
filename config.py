@@ -74,8 +74,8 @@ MOBILE = {
 
 # ── GPS ──
 GPS = {
-    "MAX_ACCURACY_METERS": 100,
-    "TIMEOUT_SECONDS":     12,
+    "MAX_ACCURACY_METERS": 30,     # تا رسیدن به این دقت (متر) منتظر GPS می‌ماند
+    "TIMEOUT_SECONDS":     25,     # حداکثر زمان انتظار برای GPS
     "CACHE_SECONDS":       0,
 }
 

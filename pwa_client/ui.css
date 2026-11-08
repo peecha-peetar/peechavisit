@@ -195,3 +195,31 @@ canvas { display: none; width: 100%; margin-top: 10px; border-radius: 10px; bord
 /* ── تنظیمات اپ (از سرور) ── */
 body.hide-price .price-field { display: none; }
 body.hide-price .row2:has(.price-field) { grid-template-columns: 1fr; }
+
+/* ── پنجرهٔ پیام فارسی ── */
+.pv-dlg-wrap { position: fixed; inset: 0; z-index: 1000; background: rgba(16,24,40,.45);
+               display: flex; align-items: center; justify-content: center; padding: 20px; }
+.pv-dlg { width: 100%; max-width: 380px; background: var(--card); border-radius: 14px; padding: 18px 16px 14px;
+          box-shadow: 0 12px 40px rgba(16,24,40,.25); }
+.pv-dlg-msg { font-size: 15px; line-height: 1.9; white-space: pre-line; color: var(--text); }
+.pv-dlg-btns { display: flex; gap: 8px; margin-top: 14px; }
+.pv-dlg-btns .btn { margin-top: 0; flex: 1; }
+
+/* ── گزارش کار من ── */
+.report-view { position: fixed; inset: 0; z-index: 40; background: var(--bg); overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.report-view[hidden] { display: none; }
+.rep-kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+.rep-kpis div { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; text-align: center; }
+.rep-kpis b { display: block; font-size: 20px; font-weight: 800; }
+.rep-kpis span { font-size: 12px; color: var(--muted); }
+.rep-kpis small { display: block; font-size: 12px; color: var(--text); margin-top: 2px; }
+.rep-list:empty::before { content: 'موردی نیست'; display: block; color: var(--muted); font-size: 14px; padding: 6px 0; }
+.rep-row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid #eef0f4; }
+.rep-row:last-child { border-bottom: 0; }
+.rep-row .info { flex: 1; min-width: 0; }
+.rep-row .n { font-weight: 600; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rep-row .d { font-size: 12px; color: var(--muted); }
+.rep-row .a { font-weight: 700; font-size: 14px; white-space: nowrap; }
+.rep-row .tag { font-size: 11px; font-weight: 700; border-radius: 10px; padding: 1px 8px; background: var(--primary-soft); color: var(--primary); }
+.rep-row .tag.wait { background: var(--warn-soft); color: #b35c00; }
+.rep-row img { width: 40px; height: 40px; border-radius: 8px; object-fit: cover; }

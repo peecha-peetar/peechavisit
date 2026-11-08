@@ -284,6 +284,15 @@ def alter_existing_tables():
             ALTER TABLE payments ADD {col} {dtype};
         """)
 
+    # ─── visits: دقت GPS (متر) ───
+    cur.execute("""
+        IF NOT EXISTS (
+            SELECT 1 FROM sys.columns
+            WHERE object_id = OBJECT_ID('visits') AND name = 'gps_accuracy'
+        )
+        ALTER TABLE visits ADD gps_accuracy FLOAT NULL;
+    """)
+
     # ─── visits: created_at ───
     cur.execute("""
         IF NOT EXISTS (

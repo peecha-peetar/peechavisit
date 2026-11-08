@@ -163,3 +163,32 @@ function jalaliToGregorian(jy, jm, jd) {
     for (gm = 1; gm <= 12 && gd > gmd[gm]; gm++) gd -= gmd[gm];
     return `${gy}-${String(gm).padStart(2, '0')}-${String(gd).padStart(2, '0')}`;
 }
+
+// ══════════════════════════════════════════
+// پیام‌های فارسی داخل اپ
+// ──────────────────────────────────────────
+// alert/confirm مرورگر در اندروید عنوانی با آدرس داخلی صفحه دارد؛
+// به‌جای آن یک پنجرهٔ فارسی با فونت وزیر نمایش داده می‌شود.
+// ══════════════════════════════════════════
+function pvDialog(msg, buttons = [{ text: 'باشه', primary: true, value: true }]) {
+    return new Promise(resolve => {
+        const wrap = document.createElement('div');
+        wrap.className = 'pv-dlg-wrap';
+        wrap.innerHTML = '<div class="pv-dlg" role="alertdialog"><div class="pv-dlg-msg"></div><div class="pv-dlg-btns"></div></div>';
+        wrap.querySelector('.pv-dlg-msg').textContent = String(msg ?? '');
+        const box = wrap.querySelector('.pv-dlg-btns');
+        buttons.forEach(b => {
+            const el = document.createElement('button');
+            el.type = 'button';
+            el.className = 'btn ' + (b.primary ? 'btn-primary' : 'btn-outline');
+            el.textContent = b.text;
+            el.onclick = () => { wrap.remove(); resolve(b.value); };
+            box.appendChild(el);
+        });
+        document.body.appendChild(wrap);
+    });
+}
+window.alert = msg => { pvDialog(msg); };
+function pvConfirm(msg, okText = 'بله', cancelText = 'انصراف') {
+    return pvDialog(msg, [{ text: cancelText, value: false }, { text: okText, primary: true, value: true }]);
+}

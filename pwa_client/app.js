@@ -422,6 +422,16 @@ function renderBasket() {
 // ══════════════════════════════════════════
 // دوربین‌ها
 // ══════════════════════════════════════════
+// خطاهای دوربین به فارسی
+function camErrFa(err) {
+    const n = err && err.name;
+    if (n === 'NotAllowedError' || n === 'SecurityError')
+        return 'اجازهٔ دسترسی به دوربین داده نشده است.\nاز تنظیمات گوشی ← برنامه‌ها ← پیچا ویزیت ← مجوزها، «دوربین» را فعال کنید.';
+    if (n === 'NotFoundError' || n === 'OverconstrainedError') return 'دوربین مناسب روی این گوشی پیدا نشد.';
+    if (n === 'NotReadableError' || n === 'AbortError') return 'دوربین در اختیار برنامهٔ دیگری است. آن برنامه را ببندید و دوباره تلاش کنید.';
+    return 'باز کردن دوربین ممکن نشد. دوباره تلاش کنید.';
+}
+
 function openCamera() {
     if (localStream) { stopCamera(); return; }
     const btn = document.getElementById("cam-toggle-btn");
@@ -437,7 +447,7 @@ function openCamera() {
         btn.disabled = false; btn.style.background = "#dc2626";
     }).catch(err => {
         btn.textContent = "📷 باز کردن دوربین سلفی"; btn.disabled = false;
-        alert(err.name==="NotAllowedError" ? "⚠️ دسترسی رد شد." : "⚠️ "+err.message);
+        alert("⚠️ " + camErrFa(err));
     });
 }
 function stopCamera() {
@@ -472,7 +482,7 @@ function openCheckCamera() {
         btn.textContent = "❌ بستن دوربین"; btn.disabled = false; btn.style.background = "#dc2626";
     }).catch(err => {
         btn.textContent = "📸 عکس از چک بگیر"; btn.disabled = false;
-        alert("⚠️ " + (err.name==="NotAllowedError"?"دسترسی رد شد":err.message));
+        alert("⚠️ " + camErrFa(err));
     });
 }
 function stopCheckCamera() {
@@ -504,7 +514,7 @@ function openTransferCamera() {
         btn.textContent = "❌ بستن دوربین"; btn.disabled = false; btn.style.background = "#dc2626";
     }).catch(err => {
         btn.textContent = "📸 عکس از رسید حواله"; btn.disabled = false;
-        alert("⚠️ " + (err.name==="NotAllowedError"?"دسترسی رد شد":err.message));
+        alert("⚠️ " + camErrFa(err));
     });
 }
 function stopTransferCamera() {
@@ -532,14 +542,43 @@ function showOk(id) {
 // ══════════════════════════════════════════
 // GPS
 // ══════════════════════════════════════════
-function getGPS(ok, fail) {
-    if (!navigator.geolocation) { fail("GPS پشتیبانی نمیشه"); return; }
-    navigator.geolocation.getCurrentPosition(
-        p => (p.coords.latitude&&p.coords.longitude)
-            ? ok(p.coords.latitude,p.coords.longitude) : fail("مختصات نامعتبر"),
-        e => fail(e.message),
-        { enableHighAccuracy:true, timeout:12000, maximumAge:0 }
-    );
+// خطاهای موقعیت‌یابی به فارسی
+function gpsErrFa(e) {
+    if (!e) return 'موقعیت مکانی دریافت نشد.';
+    if (e.code === 1) return 'اجازهٔ دسترسی به موقعیت مکانی داده نشده است.\nاز تنظیمات گوشی ← برنامه‌ها ← پیچا ویزیت ← مجوزها، «مکان» را فعال کنید.';
+    if (e.code === 2) return 'موقعیت پیدا نشد. GPS (مکان) گوشی را روشن کنید و ترجیحاً در فضای باز دوباره تلاش کنید.';
+    if (e.code === 3) return 'دریافت موقعیت بیش از حد طول کشید. GPS را روشن کنید و دوباره تلاش کنید.';
+    return 'موقعیت مکانی دریافت نشد.';
+}
+
+// ══════════════════════════════════════════
+// GPS دقیق: چند ثانیه به گوشی فرصت می‌دهیم و دقیق‌ترین موقعیت را برمی‌داریم
+// (اولین پاسخ معمولاً از شبکه/وای‌فای است و ده‌ها تا صدها متر خطا دارد)
+// ══════════════════════════════════════════
+function getGPS(ok, fail, progress) {
+    if (!navigator.geolocation) { fail('این گوشی از موقعیت‌یابی پشتیبانی نمی‌کند.'); return; }
+    const target = appRules.GPS_MAX_ACCURACY || 30;
+    const limit  = (appRules.GPS_TIMEOUT || 25) * 1000;
+    let best = null, lastErr = null, finished = false, wid = null, timer = null;
+    const finish = () => {
+        if (finished) return;
+        finished = true;
+        if (wid !== null) navigator.geolocation.clearWatch(wid);
+        clearTimeout(timer);
+        if (best) ok(best.lat, best.lng, best.acc, best.acc <= target);
+        else fail(gpsErrFa(lastErr));
+    };
+    wid = navigator.geolocation.watchPosition(p => {
+        const c = p.coords;
+        if (!c.latitude || !c.longitude) return;
+        if (!best || c.accuracy < best.acc) best = { lat: c.latitude, lng: c.longitude, acc: Math.round(c.accuracy) };
+        if (progress) progress(best.acc, target);
+        if (best.acc <= target) finish();
+    }, e => {
+        lastErr = e;
+        if (e.code === 1) finish();          // اجازه داده نشده؛ صبر بی‌فایده است
+    }, { enableHighAccuracy: true, maximumAge: 0, timeout: limit });
+    timer = setTimeout(finish, limit);
 }
 
 // ══════════════════════════════════════════
@@ -618,10 +657,18 @@ function submitIntegratedForm() {
 
     isSubmitting = true;
     const btn = document.getElementById("submit-btn");
-    btn.disabled = true; btn.innerHTML = "⏳ دریافت موقعیت GPS...";
+    btn.disabled = true; btn.innerHTML = "⏳ در حال یافتن موقعیت دقیق...";
+    const resetBtn = () => { isSubmitting = false; btn.disabled = false; btn.innerHTML = "ثبت و ارسال"; };
 
-    getGPS((lat,lng) => {
-        btn.innerHTML = "⏳ در حال پردازش...";
+    getGPS(async (lat, lng, acc, precise) => {
+        if (!precise) {
+            const go = await pvConfirm(
+                `دقت موقعیت فعلی حدود ${fmt(acc)} متر است (هدف: ${fmt(appRules.GPS_MAX_ACCURACY || 30)} متر).\n` +
+                'برای دقت بیشتر GPS را روشن کنید و در فضای باز «تلاش دوباره» را بزنید.',
+                'ثبت با همین دقت', 'تلاش دوباره');
+            if (!go) { resetBtn(); submitIntegratedForm(); return; }
+        }
+        btn.innerHTML = "⏳ در حال ثبت...";
         const now = new Date();
         const uid = generateUID();
         const payload = {
@@ -629,7 +676,7 @@ function submitIntegratedForm() {
             // ✅ visitor_id از session — نه از کاربر
             visitor_id: getVisitorId(),
             customer_code: customerCode,
-            latitude: lat, longitude: lng,
+            latitude: lat, longitude: lng, accuracy: acc,
             description: document.getElementById("visit-desc").value,
             selfie_b64: selfie,
             client_date: localDateStr(now),
@@ -644,9 +691,10 @@ function submitIntegratedForm() {
             else done(btn, false, payload.client_time);
         });
     }, errMsg => {
-        isSubmitting = false; btn.disabled = false;
-        btn.innerHTML = "ثبت و ارسال";
-        alert("❌ GPS دریافت نشد: " + (errMsg||""));
+        resetBtn();
+        alert("❌ " + errMsg);
+    }, (acc, target) => {
+        btn.innerHTML = `⏳ در حال یافتن موقعیت دقیق... (دقت فعلی ${fmt(acc)} متر)`;
     });
 }
 
@@ -717,9 +765,9 @@ function done(btn, sent, t) {
 // همگام‌سازی
 // ══════════════════════════════════════════
 async function syncLocalDataToServer() {
-    if (!navigator.onLine) { alert("❌ اینترنت ندارید."); return; }
+    // آفلاین: ارسال ممکن نیست؛ صف ثبت‌ها و آخرین گزارش نمایش داده می‌شود
+    if (!navigator.onLine) { openReport(true); return; }
     if (isSyncing||isSubmitting) return;
-    if (!navigator.onLine) { alert("❌ اینترنت وصل نیست. لطفاً بعداً امتحان کنید."); return; }
     if (!getSession()) { window.location.replace('login.html'); return; }
     fetchServerData();   // لیست مشتری، کالا و تنظیمات هم بروز شود
     isSyncing = true;
@@ -742,7 +790,8 @@ async function syncLocalDataToServer() {
         }
     }
     isSyncing = false; updateSyncCount();
-    alert(`✅ ${ok} ثبت${skip?` | ⏭️ ${skip} تکراری`:''}${fail?` | ❌ ${fail} ناموفق`:''}`);
+    alert(`✅ ${fmt(ok)} ثبت ارسال شد${skip?` | ${fmt(skip)} تکراری`:''}${fail?` | ❌ ${fmt(fail)} ناموفق`:''}`);
+    if (!document.getElementById('report-view').hidden) { renderQueue(); loadReport(); }
 }
 
 // ══════════════════════════════════════════
@@ -805,3 +854,115 @@ function resetForm() {
         if (sel) sel.value = String(jm).padStart(2,'0');
     });
 })();
+
+
+// ══════════════════════════════════════════
+// گزارش کار من
+// ──────────────────────────────────────────
+// صف ارسال از IndexedDB (آفلاین هم کار می‌کند) + ثبت‌های سرور (/api/my-report)
+// که برای مشاهدهٔ آفلاین در کش نگه داشته می‌شود.
+// ══════════════════════════════════════════
+let repRange = 'today';
+const MODE_LABEL = { visit: 'ویزیت', order: 'ویزیت + سفارش', pay: 'ویزیت + دریافت' };
+
+function jdateFa(iso) {
+    const [y, m, d] = String(iso || '').slice(0, 10).split('-').map(Number);
+    if (!y) return '—';
+    const [jy, jm, jd] = gregorianToJalali(y, m, d);
+    return `${jy}/${String(jm).padStart(2, '0')}/${String(jd).padStart(2, '0')}`.replace(/\d/g, x => '۰۱۲۳۴۵۶۷۸۹'[x]);
+}
+const faDigits = v => String(v ?? '').replace(/\d/g, x => '۰۱۲۳۴۵۶۷۸۹'[x]);
+
+function repDates(r) {
+    const now = new Date();
+    const to = localDateStr(now);
+    if (r === 'week') { const f = new Date(now); f.setDate(f.getDate() - 6); return [localDateStr(f), to]; }
+    if (r === 'month') { const [jy, jm] = todayJalali(); return [jalaliToGregorian(jy, jm, 1), to]; }
+    return [to, to];
+}
+
+function openReport(focusQueue) {
+    const v = document.getElementById('report-view');
+    if (v.hidden) { v.hidden = false; history.pushState({ pvReport: 1 }, ''); }
+    document.getElementById('rep-sub').textContent = getVisitorName();
+    renderQueue();
+    loadReport();
+    if (focusQueue) setTimeout(() => document.getElementById('rep-queue-card').scrollIntoView({ behavior: 'smooth' }), 50);
+}
+function closeReport() {
+    if (history.state && history.state.pvReport) history.back();
+    else document.getElementById('report-view').hidden = true;
+}
+window.addEventListener('popstate', () => { document.getElementById('report-view').hidden = true; });
+
+function setRepRange(r) {
+    repRange = r;
+    document.querySelectorAll('#rep-range .menu-btn').forEach(b => b.classList.toggle('active', b.dataset.r === r));
+    loadReport();
+}
+
+function renderQueue() {
+    if (!db) return;
+    db.transaction('offline_queue', 'readonly').objectStore('offline_queue').getAll().onsuccess = e => {
+        const recs = (e.target.result || []).sort((a, b) => (b.client_date + b.client_time).localeCompare(a.client_date + a.client_time));
+        document.getElementById('rep-queue-n').textContent = faDigits(recs.length);
+        document.getElementById('rep-queue-n').style.background = recs.length ? '' : '#adb5bd';
+        document.getElementById('rep-send').style.display = recs.length ? '' : 'none';
+        document.getElementById('rep-queue').innerHTML = recs.map(r => {
+            const c = allCustomersRaw.find(x => String(x.code) === String(r.customer_code));
+            const amount = r.mode === 'order' ? (r.order_items || []).reduce((t, i) => t + i.qty * i.price, 0)
+                         : r.mode === 'pay' && r.payment_info ? r.payment_info.amount : null;
+            return `<div class="rep-row">
+                ${r.selfie_b64 ? `<img src="${r.selfie_b64}" alt="">` : ''}
+                <div class="info"><div class="n">${escHtml(c ? c.name : r.customer_code)}</div>
+                <div class="d">${jdateFa(r.client_date)} · ${faDigits(String(r.client_time).slice(0, 5))} · <span class="tag wait">${MODE_LABEL[r.mode] || 'ویزیت'} — در صف</span></div></div>
+                ${amount !== null && appRules.SHOW_PRICE ? `<div class="a">${fmt(amount)}</div>` : ''}
+            </div>`;
+        }).join('');
+    };
+}
+
+function renderReport(d, stamp) {
+    const sum = (a, k) => a.reduce((t, x) => t + (x[k] || 0), 0);
+    const money = n => appRules.SHOW_PRICE ? `<small>${fmt(n)} ریال</small>` : '';
+    document.getElementById('rep-kpis').innerHTML =
+        `<div><b>${fmt(d.visits.length)}</b><span>ویزیت</span></div>` +
+        `<div><b>${fmt(d.orders.length)}</b><span>سفارش</span>${money(sum(d.orders, 'total'))}</div>` +
+        `<div><b>${fmt(d.payments.length)}</b><span>دریافت</span>${money(sum(d.payments, 'amount'))}</div>`;
+    const row = (name, date, time, extra, amount) => `<div class="rep-row"><div class="info">
+        <div class="n">${escHtml(name)}</div><div class="d">${jdateFa(date)} · ${faDigits(time)}${extra ? ' · ' + extra : ''}</div></div>
+        ${amount !== undefined && appRules.SHOW_PRICE ? `<div class="a">${fmt(amount)}</div>` : ''}</div>`;
+    document.getElementById('rep-visits').innerHTML = d.visits.map(v => row(v.customer, v.date, v.time, escHtml(v.description || ''))).join('');
+    document.getElementById('rep-orders').innerHTML = d.orders.map(o => row(o.customer, o.date, o.time, `${fmt(o.items)} قلم`, o.total)).join('');
+    document.getElementById('rep-pays').innerHTML = d.payments.map(p => row(p.customer, p.date, p.time, `<span class="tag">${escHtml(p.type)}</span>`, p.amount)).join('');
+    document.getElementById('rep-stamp').textContent = stamp;
+}
+
+function loadReport() {
+    const range = repRange;
+    const [from, to] = repDates(range);
+    const key = 'report_' + range;
+    const fromCache = note => {
+        if (!db) return;
+        db.transaction('cached_data', 'readonly').objectStore('cached_data').get(key).onsuccess = e => {
+            const c = e.target.result;
+            if (c && c.list) {
+                const t = new Date(c.at);
+                renderReport(c.list, `${note} — آخرین بروزرسانی: ${jdateFa(localDateStr(t))} ساعت ${faDigits(t.toTimeString().slice(0, 5))}`);
+            } else {
+                renderReport({ visits: [], orders: [], payments: [] }, `${note} — گزارشی از قبل ذخیره نشده است.`);
+            }
+        };
+    };
+    if (!navigator.onLine) { fromCache('حالت آفلاین'); return; }
+    document.getElementById('rep-stamp').textContent = 'در حال دریافت گزارش...';
+    apiFetch(`/my-report?from=${from}&to=${to}`)
+        .then(r => r.json())
+        .then(d => {
+            if (range !== repRange) return;
+            if (d.status !== 'success') { fromCache(d.message || 'دریافت گزارش ناموفق بود'); return; }
+            db.transaction('cached_data', 'readwrite').objectStore('cached_data').put({ type: key, list: d, at: Date.now() });
+            renderReport(d, 'بروز — ' + jdateFa(localDateStr(new Date())));
+        })
+        .catch(err => { if (err.message !== 'TOKEN_EXPIRED') fromCache('اتصال به سرور برقرار نشد'); });
+}
