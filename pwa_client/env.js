@@ -43,6 +43,56 @@ function getApiBase() {
 }
 
 // ══════════════════════════════════════════
+// اپ اندروید: ارسال درخواست‌های سرور از طریق کد بومی اندروید
+// ──────────────────────────────────────────
+// WebView ممکن است درخواست از صفحهٔ امن (https) به سرور http داخل شبکه
+// را مسدود کند (Mixed Content / Local Network Access).
+// برای همین fetch به آدرس‌های بیرونی به PeechaNative سپرده می‌شود.
+// ══════════════════════════════════════════
+if (PV_IS_APP && window.PeechaNative) {
+    const nativeFetchOrig = window.fetch.bind(window);
+    const pending = {};
+    let seq = 0;
+
+    // پاسخ از سمت اندروید: {id, status, body, type} یا {id, error}
+    window.__pvNativeDone = raw => {
+        const r = JSON.parse(raw);
+        const p = pending[r.id];
+        if (!p) return;                     // قبلاً abort شده
+        delete pending[r.id];
+        if (r.error || r.status < 200 || r.status > 599) {
+            p.reject(new TypeError(r.error || 'Network request failed'));
+            return;
+        }
+        const noBody = [204, 205, 304].includes(r.status);
+        p.resolve(new Response(noBody ? null : r.body,
+            { status: r.status, headers: { 'Content-Type': r.type || 'application/json' } }));
+    };
+
+    window.fetch = (input, init = {}) => {
+        const url = new URL(typeof input === 'string' ? input : input.url, window.location.href);
+        if (url.host === window.location.host || !/^https?:$/.test(url.protocol))
+            return nativeFetchOrig(input, init);
+
+        return new Promise((resolve, reject) => {
+            const id = String(++seq);
+            const signal = init.signal;
+            if (signal) {
+                if (signal.aborted) { reject(new DOMException('Aborted', 'AbortError')); return; }
+                signal.addEventListener('abort', () => {
+                    if (pending[id]) { delete pending[id]; reject(new DOMException('Aborted', 'AbortError')); }
+                });
+            }
+            pending[id] = { resolve, reject };
+            const headers = init.headers instanceof Headers
+                ? Object.fromEntries(init.headers.entries()) : (init.headers || {});
+            window.PeechaNative.request(id, (init.method || 'GET').toUpperCase(), url.href,
+                JSON.stringify(headers), init.body == null ? '' : String(init.body), 30000);
+        });
+    };
+}
+
+// ══════════════════════════════════════════
 // ذخیرهٔ token
 // ──────────────────────────────────────────
 // وب‌اپ → sessionStorage (با بستن مرورگر پاک می‌شود)

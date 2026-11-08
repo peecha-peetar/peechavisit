@@ -3,7 +3,8 @@
 // اپ موبایل (pwa_client) را از داخل خود APK اجرا می‌کند.
 // صفحات از دامنهٔ امن https://appassets.androidplatform.net بارگذاری می‌شوند
 // تا دوربین و GPS (که فقط روی مبدأ امن کار می‌کنند) فعال باشند؛
-// درخواست‌های API مستقیماً به سرور داخلی (http://IP:5000) می‌روند.
+// درخواست‌های API از طریق PeechaNative (کد بومی) به سرور داخلی
+// (http://IP:5000) می‌روند تا محدودیت‌های شبکهٔ WebView مانع نشوند.
 // ════════════════════════════════════════════════
 package ir.peecha.visit;
 
@@ -15,6 +16,7 @@ import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.webkit.GeolocationPermissions;
+import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -25,8 +27,19 @@ import android.webkit.WebViewClient;
 
 import androidx.webkit.WebViewAssetLoader;
 
+import org.json.JSONObject;
+
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class MainActivity extends Activity {
 
@@ -101,12 +114,74 @@ public class MainActivity extends Activity {
             }
         });
 
+        webView.addJavascriptInterface(new NativeHttp(), "PeechaNative");
+
         // مجوزها را از ابتدا بگیریم تا اولین ثبت ویزیت معطل نشود
         requestMissing(Manifest.permission.CAMERA, Manifest.permission.ACCESS_FINE_LOCATION,
                 Manifest.permission.ACCESS_COARSE_LOCATION);
 
         if (savedInstanceState != null) webView.restoreState(savedInstanceState);
         else webView.loadUrl(START_URL);
+    }
+
+    // ── درخواست HTTP بومی (env.js آن را جایگزین fetch می‌کند) ──
+    private class NativeHttp {
+        private final ExecutorService pool = Executors.newFixedThreadPool(3);
+
+        @JavascriptInterface
+        public void request(String id, String method, String url, String headersJson,
+                            String body, int timeoutMs) {
+            pool.execute(() -> {
+                JSONObject res = new JSONObject();
+                HttpURLConnection conn = null;
+                try {
+                    res.put("id", id);
+                    URL u = new URL(url);
+                    String proto = u.getProtocol();
+                    if (!"http".equals(proto) && !"https".equals(proto))
+                        throw new IllegalArgumentException("unsupported scheme");
+
+                    conn = (HttpURLConnection) u.openConnection();
+                    conn.setRequestMethod(method);
+                    conn.setConnectTimeout(Math.min(timeoutMs, 10000));
+                    conn.setReadTimeout(timeoutMs);
+                    conn.setUseCaches(false);
+                    JSONObject headers = new JSONObject(headersJson == null || headersJson.isEmpty() ? "{}" : headersJson);
+                    for (Iterator<String> it = headers.keys(); it.hasNext(); ) {
+                        String k = it.next();
+                        conn.setRequestProperty(k, headers.optString(k));
+                    }
+                    if (body != null && !body.isEmpty() && !"GET".equals(method)) {
+                        byte[] data = body.getBytes(StandardCharsets.UTF_8);
+                        conn.setDoOutput(true);
+                        conn.setFixedLengthStreamingMode(data.length);
+                        try (OutputStream os = conn.getOutputStream()) { os.write(data); }
+                    }
+                    int status = conn.getResponseCode();
+                    InputStream is = status >= 400 ? conn.getErrorStream() : conn.getInputStream();
+                    res.put("status", status);
+                    res.put("type", conn.getContentType());
+                    res.put("body", is == null ? "" : readAll(is));
+                } catch (Exception e) {
+                    try { res.put("error", e.getClass().getSimpleName() + ": " + e.getMessage()); }
+                    catch (Exception ignored) { }
+                } finally {
+                    if (conn != null) conn.disconnect();
+                }
+                String js = "window.__pvNativeDone(" + JSONObject.quote(res.toString()) + ")";
+                runOnUiThread(() -> { if (webView != null) webView.evaluateJavascript(js, null); });
+            });
+        }
+    }
+
+    private static String readAll(InputStream is) throws java.io.IOException {
+        try (InputStream in = is) {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+            return out.toString("UTF-8");
+        }
     }
 
     // ── دوربین ──

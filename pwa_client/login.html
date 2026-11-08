@@ -179,22 +179,40 @@ function showSrvStatus(ok, msg) {
     el.className = 'srv-status ' + (ok ? 'ok' : 'err');
     el.textContent = msg;
 }
+// نتیجه: 'ok' | 'notapi' (جواب داد ولی API نیست) | 'timeout' | 'network'
 async function pingServer(base) {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 6000);
     try {
         const r = await fetch(`${base}/`, { signal: ctrl.signal });
-        const d = await r.json();
-        return d.status === 'running';
-    } catch { return false; } finally { clearTimeout(t); }
+        const d = await r.json().catch(() => null);
+        return d && d.status === 'running' ? 'ok' : 'notapi';
+    } catch (e) {
+        return e.name === 'AbortError' ? 'timeout' : 'network';
+    } finally { clearTimeout(t); }
 }
 async function testServer() {
     const base = normalizeServer(document.getElementById('server-input').value) || getServerBase();
     if (!base) { showSrvStatus(false, 'آدرس سرور را وارد کنید.'); return; }
     showSrvStatus(true, '⏳ در حال تست ' + base + ' ...');
-    showSrvStatus(...(await pingServer(base)
-        ? [true,  '✅ سرور در دسترس است.']
-        : [false, '❌ پاسخی دریافت نشد. IP، روشن بودن app.py و فایروال را بررسی کنید.']));
+    const res = await pingServer(base);
+    if (res === 'ok') { showSrvStatus(true, '✅ سرور در دسترس است. «ذخیره» را بزنید.'); return; }
+
+    // اگر پورت دیگری (مثلاً ۸۰۰۰ وب‌اپ) وارد شده، پورت API را امتحان کن
+    const u = new URL(base);
+    if (u.port !== String(PV_API_PORT)) {
+        const alt = `${u.protocol}//${u.hostname}:${PV_API_PORT}`;
+        if (await pingServer(alt) === 'ok') {
+            document.getElementById('server-input').value = u.hostname;
+            showSrvStatus(true, `✅ سرور روی پورت ${PV_API_PORT} پیدا شد. حالا «ذخیره» را بزنید.`);
+            return;
+        }
+    }
+    showSrvStatus(false, {
+        notapi:  `❌ ${base} جواب داد ولی سرور API نیست. فقط آی‌پی را بدون «:8000» وارد کنید.`,
+        timeout: `❌ ${base} جواب نداد. گوشی و کامپیوتر روی یک Wi-Fi باشند و firewall.bat اجرا شده باشد.`,
+        network: `❌ اتصال به ${base} برقرار نشد. پنجرهٔ «PeechaVisit API - port 5000» باز باشد و آی‌پی درست باشد.`,
+    }[res]);
 }
 function saveServer() {
     const raw = document.getElementById('server-input').value;
