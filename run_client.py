@@ -11,7 +11,8 @@ except ImportError:
     HOST = "0.0.0.0"
     IP   = "10.165.254.180"
 
-DIRECTORY = "pwa_client"
+from paths import RES_DIR
+DIRECTORY = os.path.join(RES_DIR, "pwa_client")
 
 class Handler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):

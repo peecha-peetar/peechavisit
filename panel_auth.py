@@ -71,7 +71,7 @@ def _login_form(title, icon, subtitle, check, source):
         with st.form("pv_admin_login", clear_on_submit=False):
             u = st.text_input("👤 نام کاربری", placeholder="admin")
             p = st.text_input("🔒 رمز عبور", type="password")
-            ok = st.form_submit_button("ورود", type="primary", use_container_width=True)
+            ok = st.form_submit_button("ورود", type="primary", width="stretch")
         if ok:
             if not u or not p:
                 st.error("نام کاربری و رمز الزامی است.")

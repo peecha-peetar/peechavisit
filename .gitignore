@@ -32,3 +32,8 @@ dist/
 # تنظیمات ذخیره‌شده از پنل مدیریت (شامل کلید امنیتی و رمز دیتابیس)
 settings.json
 settings.json.tmp
+
+# ساخت نسخهٔ نصبی (PyInstaller / WinSW) و فایل‌های اجرای launcher
+build/
+packaging/winsw/
+run/

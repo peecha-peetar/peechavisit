@@ -30,8 +30,9 @@ from ui_theme import theme_css, app_bar
 import audit
 import report
 
-BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
-STATIC_DIR = os.path.realpath(os.path.join(BASE_DIR, "static"))
+import paths
+BASE_DIR   = paths.DATA_DIR
+STATIC_DIR = os.path.realpath(paths.STATIC_DIR)
 MONTHS = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور",
           "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"]
 SALES = f"[{SALES_DB}].dbo" if re.fullmatch(r"[A-Za-z0-9_]+", SALES_DB) else "dbo"
@@ -471,16 +472,18 @@ bar = st.empty()
 pager = st.container(key="pager")
 pg_col, menu_col = pager.columns([6, 1])
 pages = PAGES if IS_ADMIN else PAGES[:3]
-page = pg_col.segmented_control("صفحه", pages, default=pages[0], key="page", required=True,
+if st.session_state.get("page") not in pages:      # مقدار اولیه فقط از راه session_state
+    st.session_state.page = pages[0]
+page = pg_col.segmented_control("صفحه", pages, key="page", required=True,
                                 label_visibility="collapsed")
 REFRESH = {"روشن — فقط وقتی ثبت جدید برسد": True, "خاموش": False}
 
-with menu_col.popover("☰ منو", use_container_width=True):
+with menu_col.popover("☰ منو", width="stretch"):
     st.selectbox("🔄 بروزرسانی خودکار", list(REFRESH), key="auto_refresh")
     st.toggle("🔔 اعلان ثبت‌ها و پیام‌های جدید", value=True, key="notify_on")
     st.divider()
     st.caption(f"👤 {USER['name']} (@{USER['username']})")
-    if st.button("🚪 خروج", use_container_width=True):
+    if st.button("🚪 خروج", width="stretch"):
         logout()
 
 
@@ -619,8 +622,8 @@ def detail_dialog(stop_by_n, items_by_order):
         lat, lng = s.get("lat"), s.get("lng")
         if lat and lng:
             b1, b2, _ = st.columns([1, 1, 2])
-            b1.link_button("🗺️ گوگل‌مپ", f"https://www.google.com/maps?q={lat},{lng}", use_container_width=True)
-            b2.link_button("🧭 نشان", f"https://neshan.org/maps/@{lat},{lng},17z", use_container_width=True)
+            b1.link_button("🗺️ گوگل‌مپ", f"https://www.google.com/maps?q={lat},{lng}", width="stretch")
+            b2.link_button("🧭 نشان", f"https://neshan.org/maps/@{lat},{lng},17z", width="stretch")
     return show_stop
 
 
@@ -635,7 +638,7 @@ def page_map():
     sel_vid = vis_opts.get(sel_vname)
     period = f_per.selectbox("بازه", PERIODS, index=4, key="f_period", label_visibility="collapsed")
     if period == "بازه دلخواه":
-        with f_date.popover(ss.get("range_lbl", "📅 انتخاب بازه"), use_container_width=True):
+        with f_date.popover(ss.get("range_lbl", "📅 انتخاب بازه"), width="stretch"):
             st.caption("از تاریخ")
             j0 = jalali_picker("from", jdatetime.date(today_j.year, today_j.month, 1))
             st.caption("تا تاریخ")
@@ -652,7 +655,7 @@ def page_map():
         j0, j1 = jdatetime.date.fromgregorian(date=g0), jdatetime.date.fromgregorian(date=g1)
         f_date.markdown(f"<div class='hint' style='text-align:center'>{fa(j0.strftime('%Y/%m/%d'))}"
                         f"{'' if g0 == g1 else ' تا ' + fa(j1.strftime('%m/%d'))}</div>", unsafe_allow_html=True)
-    if f_ref.button("🔄", use_container_width=True, help="بروزرسانی"):
+    if f_ref.button("🔄", width="stretch", help="بروزرسانی"):
         load_data.clear()
         st.rerun()
 
@@ -732,11 +735,11 @@ def page_map():
             meta.append(("کالا", "، ".join(prod_names[c] for c in sel_prod)))
         rows_v = [{"#": s["n"], "تاریخ": jdate(s["d"]), "ساعت": str(s["t"])[:5], "مشتری": s["customer"],
                    "ویزیتور": s["visitor"], "توضیحات": s["visit"]["descr"]} for s in f_visits]
-        with f_exp.popover("📥", use_container_width=True, help="خروجی همین نتیجه"):
+        with f_exp.popover("📥", width="stretch", help="خروجی همین نتیجه"):
             st.caption("خروجی کامل‌تر با فیلترهای بیشتر: صفحهٔ «📊 گزارش‌ساز»")
             sec = [("ویزیت‌ها", ["#", "تاریخ", "ساعت", "مشتری", "ویزیتور", "توضیحات"], rows_v)]
             st.download_button("📥 Excel ویزیت‌ها", data=cached_excel(tuple(meta), freeze(sec)),
-                               file_name=f"Visits_{j0.strftime('%Y%m%d')}.xlsx", use_container_width=True, on_click="ignore")
+                               file_name=f"Visits_{j0.strftime('%Y%m%d')}.xlsx", width="stretch", on_click="ignore")
 
     # ── باز کردن ثبتی که از اعلان آمده ──
     to_open, focus_n = None, None
@@ -762,9 +765,9 @@ def page_map():
             return None, None
         df = pd.DataFrame(rows)[cols[::-1]]
         if not selectable:
-            st.dataframe(df, hide_index=True, use_container_width=True, height=height)
+            st.dataframe(df, hide_index=True, width="stretch", height=height)
             return None, None
-        ev = st.dataframe(df, hide_index=True, use_container_width=True, height=height, key=key,
+        ev = st.dataframe(df, hide_index=True, width="stretch", height=height, key=key,
                           on_select="rerun", selection_mode="single-cell",
                           column_config={"👁": st.column_config.TextColumn("👁", width=36, help="نمایش جزئیات"),
                                          "#": st.column_config.TextColumn("#", width=36),
@@ -943,7 +946,7 @@ def draw_map(stops, stop_by_n, focus_n, ver):
         m.fit_bounds([[min(lats), min(lngs)], [max(lats), max(lngs)]], padding=(30, 30), max_zoom=16)
 
     stabilize(m)
-    out = st_folium(m, key=f"map_{ver}_{focus_n or 0}", height=600, use_container_width=True,
+    out = st_folium(m, key=f"map_{ver}_{focus_n or 0}", height=600, width="stretch",
                     returned_objects=["last_object_clicked_tooltip"])
     tip_txt = (out or {}).get("last_object_clicked_tooltip") or ""
     mt = re.match(r"\s*([0-9]+)\.", tip_txt.translate(_EN))
@@ -1120,7 +1123,7 @@ def page_report():
     def show_df(rows, cols, height):
         df = pd.DataFrame([{c: report.fmt(r.get(c), c) if r.get(c) not in ("",) else "—" for c in cols}
                            for r in rows], columns=cols)
-        st.dataframe(df[cols[::-1]], hide_index=True, use_container_width=True, height=height)
+        st.dataframe(df[cols[::-1]], hide_index=True, width="stretch", height=height)
 
     if grp_rows:
         st.markdown(f"<div class='sec'>خلاصه بر اساس {f_g}</div>", unsafe_allow_html=True)
@@ -1145,13 +1148,13 @@ def page_report():
         fname = f"PeechaVisit_Report_{j0.strftime('%Y%m%d')}_{j1.strftime('%Y%m%d')}"
         e1, e2, e3, _ = st.columns([1, 1, 1, 3])
         e1.download_button("📥 Excel", data=cached_excel(mt, fz), file_name=f"{fname}.xlsx",
-                           use_container_width=True, on_click="ignore")
+                           width="stretch", on_click="ignore")
         try:
             e2.download_button("📄 PDF", data=cached_pdf(mt, fz), file_name=f"{fname}.pdf", mime="application/pdf",
-                               use_container_width=True, on_click="ignore")
+                               width="stretch", on_click="ignore")
         except Exception as e:
             e2.caption(f"PDF ساخته نشد: {e}")
-        if e3.button("🖨️ چاپ", use_container_width=True):
+        if e3.button("🖨️ چاپ", width="stretch"):
             ss["dlg_open"] = True
 
             @st.dialog("پیش‌نمایش چاپ", width="large", on_dismiss=_closed)
@@ -1205,7 +1208,7 @@ def page_messages():
         with st.form("send_msg", clear_on_submit=True, border=False):
             fc1, fc2 = st.columns([5, 1])
             body = fc1.text_input("پیام", placeholder="پیام خود را بنویسید...", label_visibility="collapsed")
-            sent = fc2.form_submit_button("ارسال", type="primary", use_container_width=True)
+            sent = fc2.form_submit_button("ارسال", type="primary", width="stretch")
         if sent and body.strip():
             targets = list(names) if who == "all" else [who]
             for t in targets:
@@ -1258,7 +1261,7 @@ def page_logs():
         "رویداد": [audit.EVENT_LABELS.get(e, e) for e in df["event"]],
         "دستگاه": df["device"], "IP": df["ip"], "جزئیات": df["detail"],
     })
-    st.dataframe(out[out.columns[::-1]], hide_index=True, use_container_width=True, height=560)
+    st.dataframe(out[out.columns[::-1]], hide_index=True, width="stretch", height=560)
 
 
 # ══════════════════════════════════════════════

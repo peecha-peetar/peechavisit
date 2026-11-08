@@ -38,7 +38,7 @@ DATABASES = {
 APP = {
     "NAME":          "پیچا ویزیت",
     "NAME_EN":       "PeechaVisit",
-    "VERSION":       "2.2",
+    "VERSION":       "3.0",
     "WEBSITE":       "https://peecha.ir",
     "PRIMARY_COLOR": "#020025",
     "ACCENT_COLOR":  "#4f6ef7",
@@ -83,7 +83,8 @@ GPS = {
 # ════════════════════════════════════════════════
 # settings.json — تنظیمات ذخیره‌شده از پنل مدیریت
 # ════════════════════════════════════════════════
-SETTINGS_FILE = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "settings.json")
+from paths import DATA_DIR as _DATA_DIR
+SETTINGS_FILE = _os.path.join(_DATA_DIR, "settings.json")
 
 _SECTIONS = {
     "NETWORK": NETWORK, "DATABASES": DATABASES, "APP": APP,

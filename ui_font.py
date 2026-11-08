@@ -7,7 +7,8 @@ import base64
 import os
 from functools import lru_cache
 
-_FONT = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+from paths import RES_DIR
+_FONT = os.path.join(RES_DIR,
                      "pwa_client", "fonts", "Vazirmatn-Variable.woff2")
 
 

@@ -6,7 +6,8 @@ from functools import wraps
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
-app = Flask(__name__)
+import paths
+app = Flask(__name__, static_folder=paths.STATIC_DIR, static_url_path="/static")
 
 # ══════════════════════════════════════════
 # تنظیمات امنیتی
@@ -30,7 +31,9 @@ CORS(app,
 )
 
 # پوشه‌های آپلود
-SELFIES_DIR, CHECKS_DIR, TRANSFERS_DIR = PATHS["SELFIES_DIR"], PATHS["CHECKS_DIR"], PATHS["TRANSFERS_DIR"]
+# مسیر نسبی → داخل پوشهٔ داده (حالت نصبی: ProgramData\PeechaVisit)
+SELFIES_DIR, CHECKS_DIR, TRANSFERS_DIR = (os.path.join(paths.DATA_DIR, PATHS[k])
+                                         for k in ("SELFIES_DIR", "CHECKS_DIR", "TRANSFERS_DIR"))
 for folder in [SELFIES_DIR, CHECKS_DIR, TRANSFERS_DIR]:
     os.makedirs(folder, exist_ok=True)
 

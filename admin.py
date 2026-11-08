@@ -224,7 +224,7 @@ st.markdown(app_bar(f"🛠️ پنل مدیریت {APP['NAME']}",
                     f"نسخهٔ {APP['VERSION']} · {now_j.strftime('%Y/%m/%d  %H:%M')}",
                     [f"👑 {ADMIN['name']} (@{ADMIN['username']})"]), unsafe_allow_html=True)
 _, hc_out = st.columns([7, 1])
-if hc_out.button("🚪 خروج", use_container_width=True):
+if hc_out.button("🚪 خروج", width="stretch"):
     logout()
 
 show_flash()
@@ -364,12 +364,12 @@ with tab_users:
 
                 a1, a2, a3 = st.columns(3)
                 if locked or int(u["failed_attempts"]) > 0:
-                    if a1.button("🔓 رفع قفل / صفر کردن تلاش‌ها", key=f"ul_{uid}", use_container_width=True):
+                    if a1.button("🔓 رفع قفل / صفر کردن تلاش‌ها", key=f"ul_{uid}", width="stretch"):
                         run_sql("UPDATE visitors SET failed_attempts=0, locked_until=NULL WHERE id=?", (uid,))
                         flash(f"✅ قفل حساب @{uname} برداشته شد.")
                         st.rerun()
                 if a2.button("⏸️ غیرفعال کردن" if act else "▶️ فعال کردن", key=f"tg_{uid}",
-                             use_container_width=True):
+                             width="stretch"):
                     err = guard_admin_change(users_df, uid, role, not act)
                     if err:
                         st.error(f"❌ {err}")
@@ -378,7 +378,7 @@ with tab_users:
                         flash(f"✅ حساب @{uname} {'غیرفعال' if act else 'فعال'} شد.")
                         st.rerun()
                 has_records = int(u["n_visits"]) + int(u["n_orders"]) + int(u["n_pays"]) > 0
-                with a3.popover("🗑️ حذف کاربر", use_container_width=True, disabled=is_me):
+                with a3.popover("🗑️ حذف کاربر", width="stretch", disabled=is_me):
                     if has_records:
                         st.warning("این کاربر سابقهٔ ویزیت/سفارش/دریافت دارد و حذف آن سوابق را "
                                    "بی‌صاحب می‌کند. به‌جای حذف، حساب را غیرفعال کنید.")
@@ -607,7 +607,7 @@ with tab_cfg:
                 s_tries = e3.number_input("تلاش ناموفق تا قفل", 1, 50, int(S["MAX_LOGIN_ATTEMPTS"]))
                 s_lock = e4.number_input("مدت قفل (دقیقه)", 1, 1440, int(S["LOCKOUT_MINUTES"]))
 
-        save = st.form_submit_button("💾 ذخیرهٔ تنظیمات", type="primary", use_container_width=True)
+        save = st.form_submit_button("💾 ذخیرهٔ تنظیمات", type="primary", width="stretch")
 
     if save:
         errs = []
@@ -646,7 +646,7 @@ with tab_cfg:
             st.markdown("<div class='sec-t'>🔑 کلید امنیتی توکن‌ها</div>"
                         "<div class='sec-s'>با ساخت کلید جدید، همهٔ ویزیتورها باید دوباره وارد اپ شوند.</div>",
                         unsafe_allow_html=True)
-            if st.button("🔑 ساخت کلید جدید", use_container_width=True):
+            if st.button("🔑 ساخت کلید جدید", width="stretch"):
                 config.save_settings({"SECURITY": {"SESSION_SECRET": secrets.token_hex(32)}})
                 flash("✅ کلید جدید ساخته شد. app.py را ری‌استارت کنید.")
                 st.rerun()
@@ -656,7 +656,7 @@ with tab_cfg:
             st.markdown("<div class='sec-t'>↩️ بازگشت به پیش‌فرض</div>"
                         f"<div class='sec-s'>{sum(len(v) for v in overrides.values())} مقدار سفارشی در "
                         f"<code>settings.json</code></div>", unsafe_allow_html=True)
-            with st.popover("حذف همهٔ تنظیمات سفارشی", use_container_width=True, disabled=not overrides):
+            with st.popover("حذف همهٔ تنظیمات سفارشی", width="stretch", disabled=not overrides):
                 st.write("همهٔ مقادیر به config.py برمی‌گردند (کلید امنیتی هم).")
                 if st.button("بله، بازگردانی شود", type="primary"):
                     config.reset_settings()
@@ -717,7 +717,7 @@ with tab_sys:
             stats[f"اتصال {SALES_DB}"] = f"❌ {str(e)[:120]}"
         rows = "".join(f"<tr><td>{k}</td><td>{v}</td></tr>" for k, v in stats.items())
         st.markdown(f"<table class='cfg-tbl'>{rows}</table>", unsafe_allow_html=True)
-        if st.button("🔄 تست دوباره", use_container_width=True):
+        if st.button("🔄 تست دوباره", width="stretch"):
             st.rerun()
 
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)

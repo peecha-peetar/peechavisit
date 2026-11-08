@@ -12,7 +12,8 @@ from datetime import datetime
 import jdatetime
 import pandas as pd
 
-FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
+from paths import RES_DIR
+FONT_DIR = os.path.join(RES_DIR, "fonts")
 _FA = str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹")
 
 

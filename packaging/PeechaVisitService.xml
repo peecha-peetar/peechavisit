@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  PeechaVisitService.xml - سرویس ویندوز پیچا ویزیت (WinSW)
+  ═══════════════════════════════════════════════
+  نصب‌کننده این فایل را کنار PeechaVisitService.exe (WinSW) می‌گذارد و سرویس را
+  ثبت می‌کند: با روشن شدن ویندوز خودکار اجرا می‌شود و اگر از کار بیفتد دوباره
+  اجرا می‌شود.
+
+  دستی:  PeechaVisitService.exe install | start | stop | restart | status | uninstall
+-->
+<service>
+  <id>PeechaVisit</id>
+  <name>PeechaVisit Server</name>
+  <description>PeechaVisit - API, mobile web app, dashboard and admin panel</description>
+
+  <executable>%BASE%\PeechaVisit.exe</executable>
+  <workingdirectory>%BASE%</workingdirectory>
+  <env name="PEECHA_HOME" value="%ProgramData%\PeechaVisit"/>
+  <env name="PYTHONUTF8" value="1"/>
+
+  <!-- اجرای خودکار با ویندوز؛ با تأخیر کوتاه تا SQL Server و شبکه آماده باشند -->
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+
+  <!-- اجرای دوباره در صورت توقف ناگهانی -->
+  <onfailure action="restart" delay="10 sec"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <onfailure action="restart" delay="60 sec"/>
+  <resetfailure>1 hour</resetfailure>
+
+  <stoptimeout>20 sec</stoptimeout>
+
+  <logpath>%ProgramData%\PeechaVisit\logs</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>5120</sizeThreshold>
+    <keepFiles>3</keepFiles>
+  </log>
+</service>

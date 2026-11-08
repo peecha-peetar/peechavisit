@@ -1,0 +1,90 @@
+# ساخت نصب‌کنندهٔ ویندوز پیچا ویزیت (برنامهٔ کامپایل‌شده + سرویس ویندوز)
+# خروجی: Actions → اجرای مربوطه → Artifacts → PeechaVisit-Setup
+name: Windows installer
+
+on:
+  push:
+    paths:
+      - '*.py'
+      - 'requirements.txt'
+      - 'pwa_client/**'
+      - 'fonts/**'
+      - '.streamlit/**'
+      - 'packaging/**'
+      - '.github/workflows/windows-installer.yml'
+  workflow_dispatch:
+
+env:
+  WINSW_URL: https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Read version
+        id: ver
+        shell: pwsh
+        run: |
+          $v = python -c "import ast,re;s=open('config.py',encoding='utf-8').read();print(re.search(r'\"VERSION\":\s*\"([^\"]+)\"',s).group(1))"
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Build program (PyInstaller)
+        run: pyinstaller --noconfirm --clean packaging/PeechaVisit.spec
+
+      - name: No project source in the build
+        shell: pwsh
+        run: |
+          $names = 'app.py','dashboard.py','admin.py','config.py','db.py','auth.py','peecha_server.py','report.py'
+          $found = Get-ChildItem dist\PeechaVisit -Recurse -File | Where-Object { $names -contains $_.Name }
+          if ($found) { $found | ForEach-Object { $_.FullName }; throw "project source found in build" }
+
+      # بدون دیتابیس: وب‌اپ، داشبورد و پنل مدیریت باید بالا بیایند (صفحهٔ ورود)
+      - name: Smoke test
+        shell: pwsh
+        run: |
+          $env:PEECHA_HOME = "$env:RUNNER_TEMP\pvhome"
+          $p = Start-Process dist\PeechaVisit\PeechaVisit.exe -ArgumentList '--only','pwa','dashboard','admin' -PassThru -NoNewWindow
+          $ok = $false
+          for ($i = 0; $i -lt 40 -and -not $ok; $i++) {
+            Start-Sleep 3
+            try {
+              $a = (Invoke-WebRequest http://127.0.0.1:8000/ -UseBasicParsing).StatusCode
+              $b = (Invoke-WebRequest http://127.0.0.1:8501/_stcore/health -UseBasicParsing).StatusCode
+              $c = (Invoke-WebRequest http://127.0.0.1:8502/_stcore/health -UseBasicParsing).StatusCode
+              $ok = ($a -eq 200 -and $b -eq 200 -and $c -eq 200)
+            } catch { }
+          }
+          Get-ChildItem "$env:PEECHA_HOME\logs" | ForEach-Object { "== $($_.Name)"; Get-Content $_.FullName -Tail 15 }
+          Stop-Process -Id $p.Id -Force
+          if (-not $ok) { throw "services did not start" }
+
+      - name: Download WinSW
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force packaging\winsw | Out-Null
+          Invoke-WebRequest $env:WINSW_URL -OutFile packaging\winsw\PeechaVisitService.exe
+
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+          & $iscc "/DAppVersion=${{ steps.ver.outputs.version }}" packaging\installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "iscc failed" }
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: PeechaVisit-Setup
+          path: dist/PeechaVisit-Setup-*.exe

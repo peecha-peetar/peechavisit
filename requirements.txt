@@ -1,9 +1,10 @@
 # PeechaVisit (پیچا ویزیت) - وابستگی‌های پایتون
 # نصب:  pip install -r requirements.txt
 
-# Flask API  (app.py)
+# Flask API  (app.py) + سرور waitress در نسخهٔ نصبی (peecha_server.py)
 Flask>=3.0
 flask-cors>=4.0
+waitress>=3.0
 
 # اتصال به SQL Server  (همه فایل‌ها)
 pyodbc>=5.0
