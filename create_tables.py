@@ -254,6 +254,7 @@ def alter_existing_tables():
         ("notes",          "NVARCHAR(500) NULL"),
         ("created_at",     "DATETIME NOT NULL DEFAULT GETDATE()"),
         ("app_settings",   "NVARCHAR(1000) NULL"),   # تنظیمات اختصاصی اپ موبایل (JSON)
+        ("dash_perms",     "NVARCHAR(2000) NULL"),   # دسترسی داشبورد (JSON)
     ]
     for col, dtype in visitor_cols:
         cur.execute(f"""

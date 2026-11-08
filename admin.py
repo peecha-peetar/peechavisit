@@ -21,6 +21,8 @@ from auth import hash_password, is_locked
 from panel_auth import require_admin, logout
 from mobile_rules import LABELS as MOBILE_LABELS, global_rules, user_overrides, dump_overrides
 from ui_font import font_css
+from ui_theme import theme_css, app_bar
+import perms as P
 
 C1, C2 = APP["PRIMARY_COLOR"], APP["ACCENT_COLOR"]
 PW_MIN = int(SECURITY["PASSWORD_MIN_LEN"])
@@ -34,30 +36,8 @@ st.set_page_config(page_title=f"مدیریت | {APP['NAME']}", page_icon="🛠�
 # ══════════════════════════════════════════════
 st.markdown(f"""
 <style>
-.stApp {{ background:#f3f5fb; direction:rtl; }}
-.block-container {{ padding:3.4rem 28px 40px !important; max-width:1280px; }}
-p, label, .stMarkdown, .stCaption, .stAlert {{ direction:rtl; text-align:right; }}
 input, textarea {{ direction:rtl; }}
 input[type=number] {{ direction:ltr; text-align:left; }}
-
-/* هدر */
-.pv-head {{
-    background:{C1};
-    border-radius:18px; padding:20px 24px; color:#fff; margin-bottom:14px;
-    display:flex; justify-content:space-between; align-items:center;
-}}
-.pv-head .t {{ font-size:20px; font-weight:900; }}
-.pv-head .s {{ font-size:12px; opacity:.75; margin-top:4px; }}
-.pv-head .chip {{ background:rgba(255,255,255,.14); border-radius:30px; padding:6px 14px; font-size:12px; font-weight:700; }}
-
-/* تب‌ها */
-.stTabs [data-baseweb="tab-list"] {{
-    background:#fff; border-radius:12px; padding:5px; gap:4px;
-    box-shadow:0 2px 10px rgba(0,0,0,.05);
-}}
-.stTabs [data-baseweb="tab"] {{ border-radius:9px; font-weight:700; padding:8px 18px; }}
-.stTabs [aria-selected="true"] {{ background:{C1}; color:#fff !important; }}
-.stTabs [data-baseweb="tab-highlight"], .stTabs [data-baseweb="tab-border"] {{ display:none; }}
 
 /* کارت آمار */
 .kpi {{ background:#fff; border-radius:14px; padding:14px 16px; border:1px solid #e6e9f5;
@@ -88,6 +68,7 @@ input[type=number] {{ direction:ltr; text-align:left; }}
 .b-lock {{ background:#ffedd5; color:#c2410c; }}
 .b-me {{ background:#fef9c3; color:#854d0e; }}
 .b-app {{ background:#e0f2fe; color:#075985; }}
+.b-dash {{ background:#fff4e6; color:#b35c00; }}
 
 /* بخش‌ها */
 .sec-t {{ font-size:15px; font-weight:900; color:{C1}; margin:4px 0 2px; }}
@@ -102,7 +83,7 @@ input[type=number] {{ direction:ltr; text-align:left; }}
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown(font_css(), unsafe_allow_html=True)
+st.markdown(font_css() + "\n" + theme_css(), unsafe_allow_html=True)
 ADMIN = require_admin("پنل مدیریت پیچا", "🛠️")
 
 
@@ -160,6 +141,7 @@ def ensure_cols():
         ("locked_until", "DATETIME NULL"), ("notes", "NVARCHAR(500) NULL"),
         ("created_at", "DATETIME NOT NULL DEFAULT GETDATE()"),
         ("app_settings", "NVARCHAR(1000) NULL"),
+        ("dash_perms", "NVARCHAR(2000) NULL"),
     ]
     try:
         conn = get_conn(autocommit=True); cur = conn.cursor()
@@ -194,6 +176,7 @@ def load_users() -> pd.DataFrame:
                    v.locked_until,
                    ISNULL(v.notes,'')             AS notes,
                    ISNULL(v.app_settings,'')      AS app_settings,
+                   ISNULL(v.dash_perms,'')        AS dash_perms,
                    v.created_at,
                    (SELECT COUNT(*) FROM visits   WHERE visitor_id=v.id) AS n_visits,
                    (SELECT COUNT(*) FROM orders   WHERE visitor_id=v.id) AS n_orders,
@@ -237,20 +220,12 @@ def avatar_color(name: str) -> str:
 # هدر
 # ══════════════════════════════════════════════
 now_j = jdatetime.datetime.now()
-hc1, hc2 = st.columns([6, 1])
-with hc1:
-    st.markdown(f"""
-    <div class='pv-head'>
-        <div>
-            <div class='t'>🛠️ پنل مدیریت {APP['NAME']}</div>
-            <div class='s'>نسخهٔ {APP['VERSION']} &nbsp;•&nbsp; {now_j.strftime('%Y/%m/%d  %H:%M')}</div>
-        </div>
-        <div class='chip'>👑 {ADMIN['name']} (@{ADMIN['username']})</div>
-    </div>""", unsafe_allow_html=True)
-with hc2:
-    st.markdown("<div style='height:22px'></div>", unsafe_allow_html=True)
-    if st.button("🚪 خروج", use_container_width=True):
-        logout()
+st.markdown(app_bar(f"🛠️ پنل مدیریت {APP['NAME']}",
+                    f"نسخهٔ {APP['VERSION']} · {now_j.strftime('%Y/%m/%d  %H:%M')}",
+                    [f"👑 {ADMIN['name']} (@{ADMIN['username']})"]), unsafe_allow_html=True)
+_, hc_out = st.columns([7, 1])
+if hc_out.button("🚪 خروج", use_container_width=True):
+    logout()
 
 show_flash()
 
@@ -323,6 +298,7 @@ with tab_users:
                 + (f"<span class='badge b-lock'>🔒 قفل تا {to_jalali(u['locked_until']).split()[-1]}</span>" if locked else "")
                 + ("<span class='badge b-me'>شما</span>" if is_me else "")
                 + ("<span class='badge b-app'>📱 تنظیمات اختصاصی</span>" if user_overrides(u["app_settings"]) else "")
+                + ("<span class='badge b-dash'>📊 داشبورد</span>" if role != "admin" and P.parse(u["dash_perms"])["access"] else "")
             )
             last_visit = to_jalali(u["last_visit"], with_time=False)
             st.markdown(f"""
@@ -441,6 +417,30 @@ with tab_users:
                           + ("." if raw else " (همه روی پیش‌فرض)."))
                     st.rerun()
 
+                # ── دسترسی داشبورد ──
+                if role == "admin":
+                    st.caption("📊 مدیر سیستم به داشبورد و همهٔ اطلاعات دسترسی کامل دارد.")
+                else:
+                    dp = P.parse(u["dash_perms"])
+                    vis_all = {int(r["id"]): r["full_name"] for _, r in users_df.iterrows()}
+                    with st.form(f"dash_{uid}"):
+                        st.markdown("<div class='sec-t'>📊 دسترسی داشبورد</div>"
+                                    "<div class='sec-s'>مثلاً برای سرپرست فروش: فقط ویزیتورهای تیم خودش، با یا بدون مبلغ‌ها.</div>",
+                                    unsafe_allow_html=True)
+                        d_access = st.toggle("اجازهٔ ورود به داشبورد", value=dp["access"])
+                        d_vis = st.multiselect("ویزیتورهایی که می‌بیند (خالی = همه)", list(vis_all),
+                                               default=[v for v in dp["visitors"] if v in vis_all],
+                                               format_func=lambda v: vis_all[v], placeholder="همهٔ ویزیتورها")
+                        dc = st.columns(3)
+                        d_flags = {k: dc[i].toggle(lbl, value=dp[k]) for i, (k, lbl) in enumerate(P.LABELS.items())}
+                        save_dash = st.form_submit_button("💾 ذخیرهٔ دسترسی داشبورد")
+                    if save_dash:
+                        run_sql("UPDATE visitors SET dash_perms=? WHERE id=?",
+                                (P.dump({"access": d_access, "visitors": d_vis, **d_flags}), uid))
+                        flash(f"✅ دسترسی داشبورد @{uname} ذخیره شد"
+                              + ("." if d_access else " (بدون دسترسی)."))
+                        st.rerun()
+
 
 # ══════════════════════════════════════════════
 # تب ۲ — کاربر جدید
@@ -513,8 +513,9 @@ def _valid_host(h: str) -> bool:
 with tab_cfg:
     cur_cfg = config.current_settings()
     # تنظیمات اپ موبایل بدون ری‌استارت اعمال می‌شود، پس در مقایسه نیست
-    loaded = {s: getattr(config, s) for s in DEFAULTS if s != "MOBILE"}
-    if {s: v for s, v in cur_cfg.items() if s != "MOBILE"} != loaded:
+    live = ("MOBILE", "GPS")     # این‌ها بدون ری‌استارت اعمال می‌شوند
+    loaded = {s: getattr(config, s) for s in DEFAULTS if s not in live}
+    if {s: v for s, v in cur_cfg.items() if s not in live} != loaded:
         st.warning("⚠️ تنظیمات ذخیره‌شده با تنظیمات در حال اجرا فرق دارد. "
                    "برای اعمال، سرویس‌ها (app.py، داشبورد و این پنل) را ری‌استارت کنید.")
     if SECURITY["SESSION_SECRET"] == INSECURE_SECRET:
@@ -536,10 +537,16 @@ with tab_cfg:
             m_vals = {}
             for i, (k, label) in enumerate(MOBILE_LABELS.items()):
                 m_vals[k] = m_cols[i % 2].toggle(label, value=bool(M.get(k)))
+            G = cur_cfg.get("GPS") or {}
+            g1, g2 = st.columns(2)
+            g_acc = g1.number_input("📍 دقت مطلوب موقعیت (متر)", 5, 500, int(G.get("MAX_ACCURACY_METERS", 30)),
+                                    help="اپ تا رسیدن به این دقت منتظر GPS می‌ماند؛ اگر نرسید از ویزیتور می‌پرسد.")
+            g_time = g2.number_input("⏱️ حداکثر زمان انتظار برای GPS (ثانیه)", 5, 120, int(G.get("TIMEOUT_SECONDS", 25)))
             st.caption("برای تنظیم جداگانه برای یک ویزیتور: تب «کاربران» ← «ویرایش و عملیات» آن کاربر.")
             save_mobile = st.form_submit_button("💾 ذخیرهٔ تنظیمات اپ موبایل", type="primary")
         if save_mobile:
-            config.save_settings({"MOBILE": m_vals})
+            config.save_settings({"MOBILE": m_vals,
+                                  "GPS": {"MAX_ACCURACY_METERS": g_acc, "TIMEOUT_SECONDS": g_time}})
             flash("✅ تنظیمات اپ موبایل ذخیره شد و از همین حالا اعمال می‌شود.")
             st.rerun()
 

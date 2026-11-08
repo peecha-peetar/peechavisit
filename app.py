@@ -109,6 +109,11 @@ def setup_tables():
         """)
         cur.execute("""
             IF NOT EXISTS (SELECT 1 FROM sys.columns
+                           WHERE object_id=OBJECT_ID('visitors') AND name='dash_perms')
+            ALTER TABLE visitors ADD dash_perms NVARCHAR(2000) NULL
+        """)
+        cur.execute("""
+            IF NOT EXISTS (SELECT 1 FROM sys.columns
                            WHERE object_id=OBJECT_ID('visits') AND name='gps_accuracy')
             ALTER TABLE visits ADD gps_accuracy FLOAT NULL
         """)
