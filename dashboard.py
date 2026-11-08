@@ -1,1194 +1,559 @@
-# dashboard.py - پیچا ویزیت v5.0
-import streamlit as st
-import pandas as pd
-import folium
-from streamlit_folium import st_folium
-import jdatetime
-from datetime import datetime
+# dashboard.py - پیچا ویزیت | داشبورد v6
+# ════════════════════════════════════════════════
+# اجرا:  streamlit run dashboard.py --server.port 8501
+# هر «توقف» روی نقشه = یک ویزیت (+ سفارش و دریافتی که همان لحظه ثبت شده)
+# ════════════════════════════════════════════════
+import base64
 import io
+import os
+import re
+from datetime import date, timedelta
 
-def fa_num(n, is_currency=True):
-    """فرمت عدد با جداکننده سه‌رقمی"""
-    if n is None: return '—'
-    try:
-        n = float(n)
-        s = f"{n:,.0f}"
-        return s + (' ریال' if is_currency else '')
-    except:
-        return str(n)
+import folium
+import jdatetime
+import pandas as pd
+import streamlit as st
+from PIL import Image
+from folium.plugins import MarkerCluster
+from streamlit_folium import st_folium
 
-st.set_page_config(
-    page_title="PeechaVisit | داشبورد",
-    page_icon="📍", layout="wide",
-    initial_sidebar_state="expanded"
-)
+st.set_page_config(page_title="داشبورد | پیچا ویزیت", page_icon="📍",
+                   layout="wide", initial_sidebar_state="collapsed")
 
-# ── بارگذاری از config ──
-from config import NETWORK, APP
-from db import get_conn, TRACKING_DB
+from config import APP
+from db import get_conn, SALES_DB
 from panel_auth import require_admin, logout
 from ui_font import font_css
-SERVER_IP   = NETWORK["SERVER_IP"]
-API_PORT    = NETWORK["FLASK_PORT"]
-C1          = APP["PRIMARY_COLOR"]
+
+BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
+STATIC_DIR = os.path.realpath(os.path.join(BASE_DIR, "static"))
+C1         = APP["PRIMARY_COLOR"]
+KIND_COLOR = {"visit": "#3b5bdb", "order": "#7c3aed", "pay": "#12805c"}
+VISITOR_COLORS = ["#3b5bdb", "#e8590c", "#2b8a3e", "#c2255c", "#1098ad", "#7048e8", "#f08c00", "#495057"]
+MONTHS = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور",
+          "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"]
+SALES = f"[{SALES_DB}].dbo" if re.fullmatch(r"[A-Za-z0-9_]+", SALES_DB) else "dbo"
 
 st.markdown(font_css(), unsafe_allow_html=True)
-
-# ── ورود مدیر (قبلاً داشبورد بدون رمز برای همه باز بود) ──
-ADMIN = require_admin("داشبورد پیچا ویزیت", "📍")
-
-# ══════════════════════════════════════════════════════
-# CSS
-# ══════════════════════════════════════════════════════
 st.markdown(f"""
 <style>
-html,body,*,[class*="css"],[data-testid],
-p,span,div,label,h1,h2,h3,h4,h5,h6,
-button,input,select,textarea,th,td,li,a {{
-    font-family:'Vazirmatn',Tahoma,sans-serif !important;
-}}
-.stApp {{ background:#f0f2fa !important; direction:rtl !important; }}
-.block-container {{ padding:20px 28px !important; max-width:100% !important; }}
-
-/* ── RTL همه‌جا ── */
-.stMarkdown,.stDataFrame,th,td,label,p,span,div,
-[data-testid="stDataFrame"],[data-testid="column"],
-.stTabs,.stExpander,details,summary,
-.stAlert,.stInfo {{ direction:rtl !important; text-align:right !important; }}
-
-/* ── سایدبار ── */
-[data-testid="stSidebar"] {{
-    background:{C1} !important;
-    min-width:290px !important; width:290px !important;
-}}
-[data-testid="stSidebar"] > div:first-child {{ padding:0 !important; min-width:290px !important; }}
-[data-testid="stSidebarResizeHandle"] {{ display:none !important; }}
-/* فیلدهای انتخاب سایدبار: متن تیره روی زمینهٔ روشن (قبلاً متن سفید روی سفید دیده نمی‌شد) */
-[data-testid="stSidebar"] [data-testid="stSelectbox"] input,
-[data-testid="stSidebar"] [data-testid="stSelectbox"] svg {{
-    color:#17202e !important; -webkit-text-fill-color:#17202e !important;
-}}
-[data-testid="stSidebar"] * {{
-    color:#e8eaf6 !important;
-    font-family:'Vazirmatn',Tahoma,sans-serif !important;
-    direction:rtl !important;
-}}
-[data-testid="stSidebar"] label {{ color:#9fa8da !important; font-size:12px !important; font-weight:700 !important; }}
-[data-testid="stSidebar"] [data-baseweb="select"] > div {{
-    background:rgba(255,255,255,.08) !important;
-    border:1.5px solid rgba(255,255,255,.18) !important;
-    border-radius:10px !important; color:white !important;
-    font-size:13px !important;
-}}
-[data-testid="stSidebar"] .stButton>button {{
-    background:#3b5bdb !important;
-    color:white !important; border-radius:10px !important;
-    border:none !important; font-weight:700 !important;
-    width:100% !important; padding:11px !important; font-size:14px !important;
-}}
-[data-testid="stSidebar"] hr {{ border-color:rgba(255,255,255,.12) !important; margin:8px 0 !important; }}
-/* مخفی کردن دکمه‌های collapse سایدبار */
-[data-testid="collapsedControl"],[data-testid="stSidebarCollapseButton"],
-button[kind="header"] {{ display:none !important; }}
-
-/* ── حذف keyboard و اصلاح expander ── */
-/* مخفی کردن تمام متن‌های keyboard در همه نسخه‌های Streamlit */
-[data-testid="stExpander"] summary p + *,
-[data-testid="stExpander"] details summary > div > div:last-child:not(:first-child),
-details summary span:not([data-testid]):empty,
-details summary div + div:last-child,
-.st-emotion-cache-sh2krr,
-.st-emotion-cache-1h9usn1,
-.st-emotion-cache-p5msec,
-details > summary span[aria-label*="keyboard"],
-details > summary span[aria-label*="Keyboard"],
-button[aria-keyshortcuts],
-span[aria-keyshortcuts],
-[class*="shortcut"],
-[class*="keyboard"]:not(input):not(textarea),
-[class*="KeyboardShortcut"] {{
-    display: none !important;
-    visibility: hidden !important;
-    width: 0 !important;
-    height: 0 !important;
-    font-size: 0 !important;
-    opacity: 0 !important;
-    position: absolute !important;
-    pointer-events: none !important;
-}}
-
-/* expander RTL - فلش راست، متن راست */
-[data-testid="stExpander"] details > summary {{
-    display: flex !important;
-    flex-direction: row !important;
-    align-items: center !important;
-    gap: 10px !important;
-    padding: 14px 16px !important;
-    list-style: none !important;
-    direction: rtl !important;
-    cursor: pointer !important;
-}}
-[data-testid="stExpander"] details > summary::marker,
-[data-testid="stExpander"] details > summary::-webkit-details-marker {{ display:none !important; }}
-
-/* فلش در سمت راست (اول) */
-[data-testid="stExpander"] details > summary > svg,
-[data-testid="stExpander"] details > summary [data-testid="stExpanderToggleIcon"] {{
-    order: 0 !important;
-    flex-shrink: 0 !important;
-    color: #94a3b8 !important;
-}}
-
-/* متن عنوان */
-[data-testid="stExpander"] details > summary > div {{
-    order: 1 !important;
-    flex: 1 !important;
-    direction: rtl !important;
-    text-align: right !important;
-}}
-[data-testid="stExpander"] details > summary p {{
-    margin: 0 !important;
-    font-size: 13px !important;
-    font-weight: 700 !important;
-    color: {C1} !important;
-    direction: rtl !important;
-    text-align: right !important;
-    font-family: 'Vazirmatn', Tahoma, sans-serif !important;
-}}
-
-/* ── KPI ── */
-.kpi-box {{
-    background:white; border-radius:16px; padding:18px 14px;
-    text-align:center; box-shadow:0 3px 16px rgba(2,0,37,.08);
-    border-top:4px solid; transition:transform .18s;
-}}
-.kpi-box:hover {{ transform:translateY(-3px); }}
-.kpi-i {{ font-size:24px; margin-bottom:5px; }}
-.kpi-v {{ font-size:30px; font-weight:900; line-height:1.1; }}
-.kpi-l {{ font-size:12px; color:#64748b; font-weight:600; margin-top:3px; }}
-.kpi-s {{ font-size:11px; font-weight:700; margin-top:4px; }}
-
-/* ── تب‌ها ── */
-.stTabs [data-baseweb="tab-list"] {{
-    background:white !important; border-radius:12px !important;
-    padding:4px !important; gap:3px !important;
-    box-shadow:0 2px 10px rgba(0,0,0,.07) !important;
-    flex-direction:row-reverse !important;
-}}
-.stTabs [data-baseweb="tab"] {{
-    border-radius:9px !important; font-weight:700 !important;
-    font-size:13px !important; color:#475569 !important;
-    padding:8px 16px !important;
-}}
-.stTabs [aria-selected="true"] {{
-    background:{C1} !important; color:white !important;
-}}
-
-/* ── کارت رکورد ── */
-.rec-card {{
-    background:white; border-radius:14px;
-    border:1.5px solid #e2e8f0; margin-bottom:10px;
-    box-shadow:0 2px 10px rgba(2,0,37,.06);
-    overflow:hidden; transition:box-shadow .18s;
-    direction:rtl;
-}}
-.rec-card:hover {{ box-shadow:0 5px 20px rgba(2,0,37,.11); }}
-
-/* هدر کارت - کلیک‌پذیر */
-.rec-head {{
-    display:flex; align-items:center; justify-content:space-between;
-    padding:13px 16px; cursor:pointer; background:#f8fafc;
-    border-bottom:1.5px solid transparent; direction:rtl;
-    transition:background .15s;
-}}
-.rec-head:hover {{ background:#f0f4ff; }}
-.rec-head-open {{ border-bottom-color:#e2e8f0 !important; background:#f0f4ff !important; }}
-
-.rec-head-right {{ display:flex; align-items:center; gap:10px; direction:rtl; }}
-.rec-badge {{ display:inline-flex; align-items:center; gap:4px;
-    padding:3px 10px; border-radius:8px; font-size:11px; font-weight:700; }}
-.rec-type-visit   {{ background:#e8eaf6; color:{C1}; border:1px solid #c5cae9; }}
-.rec-type-order   {{ background:#f3e5f5; color:#6a1b9a; border:1px solid #ce93d8; }}
-.rec-type-pay     {{ background:#e8f5e9; color:#1b5e20; border:1px solid #a5d6a7; }}
-.rec-type-cash    {{ background:#e3f2fd; color:#0d47a1; }}
-.rec-type-check   {{ background:#fce4ec; color:#880e4f; }}
-.rec-type-transfer{{ background:#fff3e0; color:#e65100; }}
-
-.rec-name {{ font-size:14px; font-weight:800; color:{C1}; }}
-.rec-meta {{ font-size:11px; color:#64748b; margin-top:2px; direction:rtl; }}
-
-.rec-left {{ display:flex; align-items:center; gap:8px; }}
-.rec-amount {{ font-size:14px; font-weight:800; color:#1b5e20; white-space:nowrap; }}
-.rec-arrow {{ color:#94a3b8; font-size:14px; transition:transform .2s; }}
-.rec-arrow-open {{ transform:rotate(180deg) !important; }}
-
-/* بدنه کارت */
-.rec-body {{ padding:14px 16px; direction:rtl; }}
-
-/* گرید اطلاعات */
-.info-grid {{
-    display:grid; grid-template-columns:1fr 1fr;
-    gap:8px; direction:rtl; margin-bottom:10px;
-}}
-.info-cell {{
-    background:#f8fafc; border-radius:9px;
-    padding:9px 12px; direction:rtl;
-}}
-.info-cell .lbl {{ font-size:10px; color:#94a3b8; font-weight:700; margin-bottom:2px; }}
-.info-cell .val {{ font-size:13px; font-weight:700; color:#1e293b; }}
-
-/* جدول اقلام سفارش */
-.items-table {{ width:100%; border-collapse:collapse; direction:rtl; margin-top:8px; }}
-.items-table th {{
-    background:{C1}; color:white; padding:9px 12px;
-    font-size:12px; font-weight:700; text-align:right;
-}}
-.items-table td {{
-    padding:9px 12px; font-size:12px; text-align:right;
-    border-bottom:1px solid #f0f2fa;
-}}
-.items-table tr:last-child td {{ border-bottom:none; }}
-.items-table tr:hover td {{ background:#f8fafc; }}
-.items-total {{
-    display:flex; justify-content:space-between; align-items:center;
-    background:#f0f2fa; border-radius:8px; padding:10px 14px;
-    margin-top:6px; direction:rtl;
-}}
-.items-total .lbl {{ font-size:12px; color:#64748b; font-weight:600; }}
-.items-total .val {{ font-size:14px; font-weight:900; color:#7b1fa2; }}
-
-/* عکس */
-.img-thumb {{
-    border-radius:10px; overflow:hidden;
-    border:2px solid #e2e8f0; margin-top:8px;
-    cursor:pointer; transition:transform .18s;
-    display:inline-block; max-width:200px;
-}}
-.img-thumb:hover {{ transform:scale(1.02); }}
-.img-thumb img {{ width:100%; display:block; }}
-.img-cap {{ font-size:10px; color:#94a3b8; text-align:center; margin-top:3px; }}
-
-/* تگ وضعیت */
-.status-tag {{
-    display:inline-flex; align-items:center; gap:4px;
-    padding:4px 10px; border-radius:8px;
-    font-size:11px; font-weight:700; margin:2px;
-}}
-.status-ok  {{ background:#d1fae5; color:#065f46; }}
-.status-no  {{ background:#fee2e2; color:#991b1b; }}
-
-/* اطلاعات چک */
-.check-info,.transfer-info {{
-    border-radius:10px; padding:12px 14px;
-    margin-top:8px; direction:rtl; font-size:12px; line-height:2;
-}}
-.check-info {{ background:#fce4ec; border:1px solid #f48fb1; }}
-.transfer-info {{ background:#e3f2fd; border:1px solid #90caf9; }}
-
-/* دکمه دانلود */
-.stDownloadButton button {{
-    background:#12805c !important;
-    color:white !important; border-radius:10px !important;
-    border:none !important; font-weight:700 !important;
-    padding:10px 20px !important; font-size:13px !important;
-}}
-.stAlert {{ border-radius:11px !important; }}
-
-/* footer */
-.dash-footer {{
-    text-align:center; padding:16px; font-size:12px;
-    color:#94a3b8; direction:rtl; margin-top:20px;
-    border-top:1px solid #e2e8f0;
-}}
-.dash-footer a {{ color:#4f6ef7; text-decoration:none; font-weight:700; }}
+.stApp {{ background:#f3f5fb; direction:rtl; }}
+.block-container {{ padding:3.2rem 22px 30px !important; max-width:100% !important; }}
+[data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"], [data-testid="collapsedControl"] {{ display:none !important; }}
+p, label, .stMarkdown, .stCaption, .stAlert {{ direction:rtl; text-align:right; }}
+.pv-title {{ font-size:19px; font-weight:800; color:{C1}; line-height:1.3; padding-top:4px; }}
+.pv-range {{ font-size:12px; color:#6b7686; }}
+.kpis {{ display:flex; flex-wrap:wrap; gap:8px; margin:4px 0 12px; }}
+.kpi {{ background:#fff; border:1px solid #e3e7ef; border-radius:10px; padding:6px 12px;
+        font-size:13px; color:#495057; white-space:nowrap; }}
+.kpi b {{ font-size:15px; color:#17202e; margin-left:4px; }}
+.kpi i {{ font-style:normal; color:#6b7686; }}
+.legend {{ display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px; font-size:12px; }}
+.legend span {{ display:inline-flex; align-items:center; gap:5px; background:#fff; border:1px solid #e3e7ef;
+                border-radius:20px; padding:2px 10px; }}
+.legend i {{ width:10px; height:10px; border-radius:50%; display:inline-block; }}
+/* روز/ماه/سال در موبایل هم کنار هم بمانند */
+[class*="st-key-jp_"] [data-testid="stHorizontalBlock"] {{ flex-wrap:nowrap !important; gap:6px !important; }}
+[class*="st-key-jp_"] [data-testid="stColumn"] {{ min-width:0 !important; width:auto !important; flex:1 1 0 !important; }}
+.dlg-head {{ font-size:18px; font-weight:800; color:#17202e; }}
+.dlg-meta {{ font-size:13px; color:#6b7686; margin:2px 0 8px; }}
+.chip {{ display:inline-block; border-radius:20px; padding:2px 10px; font-size:12px; font-weight:600; margin-left:4px; }}
+.sec {{ font-size:15px; font-weight:800; margin:14px 0 6px; padding-top:10px; border-top:1px solid #eef0f4; }}
+.kv {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:8px; }}
+.kv div {{ background:#f6f7fa; border-radius:8px; padding:6px 10px; }}
+.kv small {{ display:block; font-size:11px; color:#6b7686; }}
+.kv b {{ font-size:14px; color:#17202e; font-weight:600; }}
 </style>
 """, unsafe_allow_html=True)
 
+ADMIN = require_admin("داشبورد پیچا ویزیت", "📍")
 
-# ══════════════════════════════════════════════════════
-# توابع
-# ══════════════════════════════════════════════════════
-def qry(sql, params=None, db=TRACKING_DB):
+
+# ══════════════════════════════════════════════
+# توابع کمکی
+# ══════════════════════════════════════════════
+_FA = str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹")
+_EN = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+
+
+def fa(v) -> str:
+    return str(v).translate(_FA)
+
+
+def money(n) -> str:
     try:
-        conn = get_conn(db)
-        df = pd.read_sql(sql, conn, params=params)
+        return fa(f"{float(n):,.0f}").replace(",", "٬") + " ریال"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def jdate(d) -> str:
+    if d is None or (not isinstance(d, (str, date)) and pd.isna(d)):
+        return "—"
+    try:
+        d = pd.Timestamp(d).date()
+        return fa(jdatetime.date.fromgregorian(date=d).strftime("%Y/%m/%d"))
+    except Exception:
+        return fa(str(d)[:10])
+
+
+def hhmm(t) -> str:
+    return fa(str(t or "")[:5]) or "—"
+
+
+def img_file(rel) -> str | None:
+    """مسیر ذخیره‌شده در دیتابیس (/static/...) → فایل روی دیسک (فقط داخل پوشهٔ static)"""
+    if not rel or str(rel).strip() in ("", "None", "nan"):
+        return None
+    p = os.path.realpath(os.path.join(BASE_DIR, str(rel).strip().lstrip("/\\")))
+    return p if p.startswith(STATIC_DIR + os.sep) and os.path.isfile(p) else None
+
+
+@st.cache_data(show_spinner=False, max_entries=2000)
+def thumb_b64(path: str, mtime: float) -> str:
+    with Image.open(path) as im:
+        im = im.convert("RGB")
+        im.thumbnail((220, 150))
+        buf = io.BytesIO()
+        im.save(buf, "JPEG", quality=70)
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def thumb_tag(rel) -> str:
+    p = img_file(rel)
+    if not p:
+        return ""
+    try:
+        return f"<img src='data:image/jpeg;base64,{thumb_b64(p, os.path.getmtime(p))}'>"
+    except Exception:
+        return ""
+
+
+def read_sql(sql, params=()):
+    conn = get_conn()
+    try:
+        return pd.read_sql(sql, conn, params=list(params))
+    finally:
         conn.close()
-        return df
-    except Exception as e:
-        st.error(f"خطای دیتابیس: {e}")
-        return pd.DataFrame()
 
-def to_j(d):
-    try:
-        if pd.isna(d): return '—'
-    except: pass
-    try:
-        if isinstance(d, str): d = datetime.strptime(str(d)[:10], '%Y-%m-%d').date()
-        if hasattr(d, 'date'): d = d.date()
-        return jdatetime.date.fromgregorian(date=d).strftime('%Y/%m/%d')
-    except: return str(d)[:10] if d else '—'
 
-def ct(t):
-    s = str(t).split('.')[0]
-    return s if s not in ('None','nan','') else '—'
+# ══════════════════════════════════════════════
+# داده‌ها
+# ══════════════════════════════════════════════
+@st.cache_data(ttl=60, show_spinner="در حال دریافت اطلاعات...")
+def load_visitors():
+    return read_sql("SELECT id, full_name, ISNULL(is_active,1) AS active FROM visitors ORDER BY full_name")
 
-def img(path):
-    if path and str(path).strip() not in ('','None','nan'):
-        return f"http://{SERVER_IP}:{API_PORT}{path}"
+
+@st.cache_data(ttl=60, show_spinner="در حال دریافت اطلاعات...")
+def load_data(g0: str, g1: str, vid: int | None):
+    vf = "AND {a}.visitor_id=?" if vid else ""
+    prm = (g0, g1) + ((vid,) if vid else ())
+    visits = read_sql(f"""
+        SELECT v.id, v.visitor_id, ISNULL(u.full_name, N'نامشخص') AS visitor,
+               v.customer_code, ISNULL(CAST(c.C_Name AS NVARCHAR(200)), v.customer_code) AS customer,
+               v.visit_date AS d, CONVERT(VARCHAR(8), v.visit_time, 108) AS t,
+               v.latitude AS lat, v.longitude AS lng,
+               ISNULL(v.selfie_path,'') AS selfie, ISNULL(v.description,'') AS descr
+        FROM visits v
+        LEFT JOIN visitors u ON u.id = v.visitor_id
+        LEFT JOIN {SALES}.customer c ON c.C_Code = v.customer_code
+        WHERE v.visit_date BETWEEN ? AND ? {vf.format(a='v')}
+        ORDER BY v.visit_date, v.visit_time""", prm)
+    orders = read_sql(f"""
+        SELECT o.id, o.visitor_id, ISNULL(u.full_name, N'نامشخص') AS visitor,
+               o.customer_code, ISNULL(CAST(c.C_Name AS NVARCHAR(200)), o.customer_code) AS customer,
+               o.order_date AS d, CONVERT(VARCHAR(8), o.order_time, 108) AS t,
+               o.latitude AS lat, o.longitude AS lng, o.total_amount AS total
+        FROM orders o
+        LEFT JOIN visitors u ON u.id = o.visitor_id
+        LEFT JOIN {SALES}.customer c ON c.C_Code = o.customer_code
+        WHERE o.order_date BETWEEN ? AND ? {vf.format(a='o')}
+        ORDER BY o.order_date, o.order_time""", prm)
+    pays = read_sql(f"""
+        SELECT p.id, p.visitor_id, ISNULL(u.full_name, N'نامشخص') AS visitor,
+               p.customer_code, ISNULL(CAST(c.C_Name AS NVARCHAR(200)), p.customer_code) AS customer,
+               p.payment_date AS d, CONVERT(VARCHAR(8), p.payment_time, 108) AS t,
+               p.latitude AS lat, p.longitude AS lng, p.payment_type AS ptype, p.amount,
+               ISNULL(p.check_number,'') AS check_number, ISNULL(p.check_sayyadi,'') AS check_sayyadi,
+               p.check_due_date AS check_due, ISNULL(p.check_image_path,'') AS check_img,
+               ISNULL(p.transfer_account,'') AS tr_account, ISNULL(p.transfer_tracking,'') AS tr_tracking,
+               ISNULL(p.transfer_image_path,'') AS tr_img, ISNULL(p.tracking_number,'') AS tracking
+        FROM payments p
+        LEFT JOIN visitors u ON u.id = p.visitor_id
+        LEFT JOIN {SALES}.customer c ON c.C_Code = p.customer_code
+        WHERE p.payment_date BETWEEN ? AND ? {vf.format(a='p')}
+        ORDER BY p.payment_date, p.payment_time""", prm)
+    return visits, orders, pays
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def load_items(order_id: int):
+    return read_sql(f"""
+        SELECT ISNULL(CAST(a.A_Name AS NVARCHAR(200)), oi.article_code) AS name, oi.article_code AS code,
+               CAST(oi.quantity AS FLOAT) AS qty, CAST(oi.price AS FLOAT) AS price
+        FROM order_items oi
+        LEFT JOIN {SALES}.article a ON a.A_Code = oi.article_code
+        WHERE oi.order_id=? ORDER BY oi.id""", (order_id,))
+
+
+def build_stops(visits, orders, pays):
+    """ویزیت + سفارش/دریافتِ همان لحظه = یک توقف؛ سفارش/دریافت بی‌ویزیت هم توقف جدا"""
+    key = lambda r: f"{r['visitor_id']}|{r['customer_code']}|{r['d']}|{r['t']}"
+    stops, by_key = [], {}
+    for _, v in visits.iterrows():
+        s = {**v.to_dict(), "kind": "visit", "visit": v.to_dict(), "orders": [], "pays": []}
+        by_key.setdefault(key(v), s)
+        stops.append(s)
+    for df, field, kind in ((orders, "orders", "order"), (pays, "pays", "pay")):
+        for _, r in df.iterrows():
+            s = by_key.get(key(r))
+            if s is None:
+                s = {**r.to_dict(), "kind": kind, "visit": None, "orders": [], "pays": []}
+                by_key[key(r)] = s
+                stops.append(s)
+            s[field].append(r.to_dict())
+    stops.sort(key=lambda s: (str(s["d"]), str(s["t"])))
+    for i, s in enumerate(stops, 1):
+        s["n"] = i
+    return stops
+
+
+# ══════════════════════════════════════════════
+# نوار بالا: فیلترها
+# ══════════════════════════════════════════════
+today_j = jdatetime.date.today()
+today_g = today_j.togregorian()
+
+
+def period_range(name):
+    if name == "امروز":
+        return today_g, today_g
+    if name == "دیروز":
+        y = today_g - timedelta(days=1)
+        return y, y
+    if name == "۷ روز اخیر":
+        return today_g - timedelta(days=6), today_g
+    if name == "۳۰ روز اخیر":
+        return today_g - timedelta(days=29), today_g
+    if name == "این ماه":
+        return jdatetime.date(today_j.year, today_j.month, 1).togregorian(), today_g
+    if name == "ماه قبل":
+        first = jdatetime.date(today_j.year, today_j.month, 1)
+        prev_last = first - timedelta(days=1)
+        return jdatetime.date(prev_last.year, prev_last.month, 1).togregorian(), prev_last.togregorian()
     return None
 
-def ensure_cols():
-    cols = [
-        ("check_number","VARCHAR(50)"),("check_sayyadi","VARCHAR(50)"),
-        ("check_due_date","DATE"),("check_image_path","NVARCHAR(500)"),
-        ("transfer_account","VARCHAR(100)"),("transfer_tracking","VARCHAR(100)"),
-        ("transfer_image_path","NVARCHAR(500)"),
-    ]
-    try:
-        conn = get_conn(autocommit=True)
-        cur = conn.cursor()
-        for col,dtype in cols:
-            try:
-                cur.execute(f"""IF NOT EXISTS(SELECT 1 FROM sys.columns
-                    WHERE object_id=OBJECT_ID('payments') AND name='{col}')
-                    ALTER TABLE payments ADD {col} {dtype} NULL""")
-            except: pass
-        cur.close(); conn.close()
-    except: pass
 
-ensure_cols()
+def jalali_picker(prefix, default_j):
+    years = list(range(today_j.year - 3, today_j.year + 1))
+    c1, c2, c3 = st.container(key=f"jp_{prefix}").columns([1, 1.4, 1.1])
+    d = c1.selectbox("روز", range(1, 32), index=default_j.day - 1, key=f"{prefix}_d", format_func=fa)
+    m = c2.selectbox("ماه", range(1, 13), index=default_j.month - 1, key=f"{prefix}_m",
+                     format_func=lambda x: MONTHS[x - 1])
+    y = c3.selectbox("سال", years, index=years.index(default_j.year), key=f"{prefix}_y", format_func=fa)
+    for day in range(d, 0, -1):            # روز بیشتر از طول ماه → آخرین روز ماه
+        try:
+            return jdatetime.date(y, m, day)
+        except ValueError:
+            continue
 
 
-# ══════════════════════════════════════════════════════
-# سایدبار
-# ══════════════════════════════════════════════════════
-with st.sidebar:
-    st.markdown(f"""
-    <div style='padding:22px 20px 14px;direction:rtl'>
-        <div style='display:flex;align-items:center;gap:12px'>
-            <span style='font-size:30px'>📍</span>
-            <div>
-                <div style='font-size:19px;font-weight:900;color:white'>پیچا ویزیت</div>
-                <div style='font-size:10px;color:#9fa8da;direction:ltr'>PeechaVisit.ir</div>
-            </div>
-        </div>
-    </div><hr>
-    """, unsafe_allow_html=True)
+vis_df = load_visitors()
+vis_opts = {"همهٔ ویزیتورها": None}
+vis_opts.update({(r["full_name"] + ("" if r["active"] else " (غیرفعال)")): int(r["id"]) for _, r in vis_df.iterrows()})
 
-    st.markdown("<div style='color:#9fa8da;font-size:12px;font-weight:700;padding:0 20px 6px'>👤 ویزیتور</div>", unsafe_allow_html=True)
-    vdf = qry("SELECT id,full_name FROM visitors WHERE is_active=1 OR is_active IS NULL")
-    if vdf.empty:
-        sel_vid=None; sel_vname="همه ویزیتورها"
-    else:
-        vopts = {"👥 همه ویزیتورها": None}
-        vopts.update({r['full_name']:r['id'] for _,r in vdf.iterrows()})
-        sel_vname = st.selectbox("ویزیتور", list(vopts.keys()), label_visibility="collapsed")
-        sel_vid = vopts[sel_vname]
+h_title, h_vis, h_per, h_ref, h_menu = st.columns([2.2, 2, 2, 0.9, 0.9], vertical_alignment="bottom")
+with h_title:
+    st.markdown("<div class='pv-title'>📍 داشبورد پیچا ویزیت</div>", unsafe_allow_html=True)
+sel_vname = h_vis.selectbox("ویزیتور", list(vis_opts))
+sel_vid = vis_opts[sel_vname]
+period = h_per.selectbox("بازه", ["امروز", "دیروز", "۷ روز اخیر", "۳۰ روز اخیر", "این ماه", "ماه قبل", "بازه دلخواه"],
+                         index=4)
+if h_ref.button("🔄 بروزرسانی", use_container_width=True):
+    st.cache_data.clear()
+    st.rerun()
 
-    st.markdown("<hr>", unsafe_allow_html=True)
-    st.markdown("<div style='color:#9fa8da;font-size:12px;font-weight:700;padding:0 20px 8px'>📅 بازه گزارش شمسی</div>", unsafe_allow_html=True)
+if period == "بازه دلخواه":
+    f_col, t_col = st.columns(2)
+    with f_col:
+        st.caption("از تاریخ")
+        j0 = jalali_picker("from", jdatetime.date(today_j.year, today_j.month, 1))
+    with t_col:
+        st.caption("تا تاریخ")
+        j1 = jalali_picker("to", today_j)
+    if j1 < j0:
+        st.warning("«تا تاریخ» قبل از «از تاریخ» است؛ جابه‌جا شد.")
+        j0, j1 = j1, j0
+    g0, g1 = j0.togregorian(), j1.togregorian()
+else:
+    g0, g1 = period_range(period)
+    j0, j1 = jdatetime.date.fromgregorian(date=g0), jdatetime.date.fromgregorian(date=g1)
 
-    today_j = jdatetime.date.today()
-    months = ["فروردین","اردیبهشت","خرداد","تیر","مرداد","شهریور",
-              "مهر","آبان","آذر","دی","بهمن","اسفند"]
-    years = list(range(today_j.year-3, today_j.year+2))
+try:
+    visits, orders, pays = load_data(g0.isoformat(), g1.isoformat(), sel_vid)
+except Exception as e:
+    st.error(f"❌ خطای دیتابیس: {e}")
+    st.stop()
+stops = build_stops(visits, orders, pays)
+stop_by_n = {s["n"]: s for s in stops}
 
-    st.markdown("<div style='color:#c5cae9;font-size:11px;padding:0 20px 4px'>🔹 از تاریخ</div>", unsafe_allow_html=True)
-    a,b,c = st.columns([2.6,3,2.4])
-    with a: sy = st.selectbox("سال از",years,index=years.index(today_j.year),key="sy",label_visibility="collapsed")
-    with b: sm = st.selectbox("ماه از",range(1,13),index=today_j.month-1,key="sm",
-                               format_func=lambda x:months[x-1],label_visibility="collapsed")
-    with c: sd = st.selectbox("روز از",range(1,32),index=0,key="sd",label_visibility="collapsed")
+range_txt = (f"{fa(j0.strftime('%Y/%m/%d'))}" if g0 == g1
+             else f"از {fa(j0.strftime('%Y/%m/%d'))} تا {fa(j1.strftime('%Y/%m/%d'))}")
+st.markdown(
+    f"<div class='kpis'>"
+    f"<span class='kpi'><i>{range_txt} · {sel_vname}</i></span>"
+    f"<span class='kpi'><b>{fa(len(visits))}</b>ویزیت</span>"
+    f"<span class='kpi'><b>{fa(visits['customer_code'].nunique() if len(visits) else 0)}</b>مشتری</span>"
+    f"<span class='kpi'><b>{fa(len(orders))}</b>سفارش · {money(orders['total'].sum() if len(orders) else 0)}</span>"
+    f"<span class='kpi'><b>{fa(len(pays))}</b>دریافت · {money(pays['amount'].sum() if len(pays) else 0)}</span>"
+    f"</div>", unsafe_allow_html=True)
 
-    st.markdown("<div style='color:#c5cae9;font-size:11px;padding:4px 20px'>🔸 تا تاریخ</div>", unsafe_allow_html=True)
-    d,e,f_ = st.columns([2.6,3,2.4])
-    with d: ey = st.selectbox("سال تا",years,index=years.index(today_j.year),key="ey",label_visibility="collapsed")
-    with e: em = st.selectbox("ماه تا",range(1,13),index=today_j.month-1,key="em",
-                               format_func=lambda x:months[x-1],label_visibility="collapsed")
-    with f_: ed = st.selectbox("روز تا",range(1,32),index=today_j.day-1,key="ed",label_visibility="collapsed")
 
-    try:
-        j0 = jdatetime.date(int(sy),int(sm),int(sd))
-        j1 = jdatetime.date(int(ey),int(em),int(ed))
-        g0 = j0.togregorian().strftime('%Y-%m-%d')
-        g1 = j1.togregorian().strftime('%Y-%m-%d')
-    except:
-        st.error("❌ تاریخ نامعتبر")
-        j0=j1=today_j
-        g0=g1=today_j.togregorian().strftime('%Y-%m-%d')
+# ══════════════════════════════════════════════
+# خروجی اکسل و خروج
+# ══════════════════════════════════════════════
+def excel_bytes() -> bytes:
+    out = io.BytesIO()
+    with pd.ExcelWriter(out, engine="xlsxwriter") as w:
+        sheets = {
+            "ویزیت‌ها": pd.DataFrame([{
+                "تاریخ": jdate(r.d), "ساعت": str(r.t)[:5], "ویزیتور": r.visitor, "مشتری": r.customer,
+                "کد مشتری": r.customer_code, "توضیحات": r.descr, "عرض": r.lat, "طول": r.lng}
+                for r in visits.itertuples()]),
+            "سفارش‌ها": pd.DataFrame([{
+                "شماره": r.id, "تاریخ": jdate(r.d), "ساعت": str(r.t)[:5], "ویزیتور": r.visitor,
+                "مشتری": r.customer, "کد مشتری": r.customer_code, "جمع (ریال)": float(r.total or 0)}
+                for r in orders.itertuples()]),
+            "دریافت‌ها": pd.DataFrame([{
+                "تاریخ": jdate(r.d), "ساعت": str(r.t)[:5], "ویزیتور": r.visitor, "مشتری": r.customer,
+                "کد مشتری": r.customer_code, "نوع": r.ptype, "مبلغ (ریال)": float(r.amount or 0),
+                "شماره چک": r.check_number, "صیادی": r.check_sayyadi, "سررسید": jdate(r.check_due) if r.check_due else "",
+                "حساب مقصد": r.tr_account, "پیگیری": r.tr_tracking or r.tracking}
+                for r in pays.itertuples()]),
+        }
+        items = []
+        for r in orders.itertuples():
+            for it in load_items(int(r.id)).itertuples():
+                items.append({"شماره سفارش": r.id, "مشتری": r.customer, "کالا": it.name, "کد کالا": it.code,
+                              "تعداد": it.qty, "قیمت واحد": it.price, "جمع": it.qty * it.price})
+        sheets["اقلام سفارش"] = pd.DataFrame(items)
+        head = w.book.add_format({"bold": True, "bg_color": C1, "font_color": "white", "border": 1})
+        for name, df in sheets.items():
+            if df.empty:
+                df = pd.DataFrame({"": ["در این بازه موردی نیست"]})
+            df.to_excel(w, sheet_name=name, index=False)
+            ws = w.sheets[name]
+            ws.right_to_left()
+            for i, col in enumerate(df.columns):
+                ws.write(0, i, col, head)
+                ws.set_column(i, i, 18, w.book.add_format({"num_format": "#,##0"}) if "ریال" in str(col) or col in ("قیمت واحد", "جمع") else None)
+    return out.getvalue()
 
-    st.markdown(f"""
-    <div style='background:rgba(255,255,255,.08);border-radius:10px;
-         padding:10px 14px;margin:8px 16px;font-size:12px;color:#c5cae9;
-         direction:rtl;text-align:center'>
-        <b style='color:white'>{j0.strftime('%Y/%m/%d')}</b>
-        &nbsp; ← &nbsp;
-        <b style='color:white'>{j1.strftime('%Y/%m/%d')}</b>
-    </div>
-    """, unsafe_allow_html=True)
 
-    st.markdown("<div style='padding:4px 16px 16px'>", unsafe_allow_html=True)
-    if st.button("🔄 بروزرسانی", use_container_width=True):
-        st.rerun()
-    if st.button(f"🚪 خروج ({ADMIN['username']})", use_container_width=True):
+with h_menu.popover("☰ منو", use_container_width=True):
+    st.download_button("📥 خروجی Excel", data=excel_bytes(), use_container_width=True,
+                       file_name=f"PeechaVisit_{j0.strftime('%Y%m%d')}_{j1.strftime('%Y%m%d')}.xlsx",
+                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    st.caption(f"👤 {ADMIN['name']} (@{ADMIN['username']})")
+    if st.button("🚪 خروج", use_container_width=True):
         logout()
-    st.markdown("</div><hr>", unsafe_allow_html=True)
-    st.markdown(f"""
-    <div style='padding:8px 20px 20px;font-size:11px;color:#7986cb;text-align:center'>
-        <a href='https://peecha.ir' target='_blank' style='color:#7986cb;text-decoration:none'>🌐 peecha.ir</a>
-        &nbsp;|&nbsp; PeechaVisit © ۱۴۰۵
-    </div>""", unsafe_allow_html=True)
 
 
-# ══════════════════════════════════════════════════════
-# واکشی داده‌ها
-# ══════════════════════════════════════════════════════
-# ── فیلتر ویزیتور: None = همه ──
-def _w(date_col, visitor_col_alias, params_base):
-    """ساخت WHERE clause با alias صحیح برای هر جدول"""
-    if sel_vid is not None:
-        return f"{date_col} BETWEEN ? AND ? AND {visitor_col_alias}.visitor_id=?", params_base + (sel_vid,)
-    return f"{date_col} BETWEEN ? AND ?", params_base
-
-vw, vp = _w("v.visit_date", "v", (g0,g1))
-ow, op = _w("o.order_date", "o", (g0,g1))
-pw, pp = _w("p.payment_date","p", (g0,g1))
-
-# اضافه کردن نام ویزیتور در نمایش همه
-visitor_col = ", vis.full_name AS visitor_name" if sel_vid is None else ", '' AS visitor_name"
-
-visits_df = qry(f"""
-    SELECT v.id, v.visitor_id, v.customer_code, v.visit_date, v.visit_time,
-           v.latitude, v.longitude,
-           ISNULL(v.selfie_path,'')        AS selfie_path,
-           ISNULL(v.description,'')        AS description,
-           ISNULL(CAST(c.C_Name AS NVARCHAR(200)),v.customer_code) AS C_Name
-           {visitor_col}
-    FROM visits v
-    LEFT JOIN dejavuDB1.dbo.customer c ON v.customer_code=c.C_Code
-    {"LEFT JOIN visitors vis ON v.visitor_id=vis.id" if sel_vid is None else ""}
-    WHERE {vw}
-    ORDER BY v.visit_date,v.visit_time
-""", vp)
-
-orders_df = qry(f"""
-    SELECT o.id, o.visitor_id, o.customer_code, o.order_date, o.order_time,
-           o.latitude, o.longitude, o.total_amount,
-           ISNULL(CAST(c.C_Name AS NVARCHAR(200)),o.customer_code) AS C_Name
-           {", vis2.full_name AS visitor_name" if sel_vid is None else ", \'\' AS visitor_name"}
-    FROM orders o
-    LEFT JOIN dejavuDB1.dbo.customer c ON o.customer_code=c.C_Code
-    {"LEFT JOIN visitors vis2 ON o.visitor_id=vis2.id" if sel_vid is None else ""}
-    WHERE {ow}
-    ORDER BY o.order_date,o.order_time
-""", op)
-
-pays_df = qry(f"""
-    SELECT p.id, p.visitor_id, p.customer_code, p.payment_date, p.payment_time,
-           p.payment_type, p.amount,
-           ISNULL(p.check_number,'')        AS check_number,
-           ISNULL(p.check_sayyadi,'')       AS check_sayyadi,
-           p.check_due_date,
-           ISNULL(p.check_image_path,'')    AS check_image_path,
-           ISNULL(p.transfer_account,'')    AS transfer_account,
-           ISNULL(p.transfer_image_path,'') AS transfer_image_path,
-           ISNULL(p.tracking_number,'')     AS tracking_number,
-           ISNULL(CAST(c.C_Name AS NVARCHAR(200)),p.customer_code) AS C_Name
-           {", vis3.full_name AS visitor_name" if sel_vid is None else ", \'\' AS visitor_name"}
-    FROM payments p
-    LEFT JOIN dejavuDB1.dbo.customer c ON p.customer_code=c.C_Code
-    {"LEFT JOIN visitors vis3 ON p.visitor_id=vis3.id" if sel_vid is None else ""}
-    WHERE {pw}
-    ORDER BY p.payment_date,p.payment_time
-""", pp)
+# ══════════════════════════════════════════════
+# جزئیات یک توقف (پنجره)
+# ══════════════════════════════════════════════
+def _closed():
+    # پاک شدن انتخاب نقشه و جدول تا کلیک دوباره روی همان مورد هم کار کند
+    st.session_state["ui_ver"] = st.session_state.get("ui_ver", 0) + 1
 
 
-# ══════════════════════════════════════════════════════
-# هدر
-# ══════════════════════════════════════════════════════
-tv=len(visits_df); to_=len(orders_df)
-toa=orders_df['total_amount'].sum() if not orders_df.empty else 0
-tp=len(pays_df); tpa=pays_df['amount'].sum() if not pays_df.empty else 0
-
-st.markdown(f"""
-<div style='background:white;border-radius:15px;padding:15px 22px;
-     box-shadow:0 3px 16px rgba(2,0,37,.08);margin-bottom:16px;
-     direction:rtl;display:flex;align-items:center;justify-content:space-between'>
-    <div>
-        <div style='font-size:19px;font-weight:900;color:{C1}'>📊 داشبورد پیچا ویزیت</div>
-        <div style='font-size:12px;color:#64748b;margin-top:3px'>
-            👤 <b style='color:#3949ab'>{sel_vname}</b>
-            &nbsp;|&nbsp; {j0.strftime('%Y/%m/%d')} تا {j1.strftime('%Y/%m/%d')}
-        </div>
-    </div>
-</div>
-""", unsafe_allow_html=True)
+def kv(items) -> str:
+    return "<div class='kv'>" + "".join(
+        f"<div><small>{k}</small><b>{v if v not in (None, '') else '—'}</b></div>" for k, v in items) + "</div>"
 
 
-# ══ KPI ══
-k1,k2,k3,k4 = st.columns(4)
-kdata=[
-    (k1,"📍",tv,"ویزیت",f"{tv} مشتری","#3949ab","#e8eaf6"),
-    (k2,"📦",to_,"سفارش",fa_num(toa),"#7b1fa2","#f3e5f5"),
-    (k3,"💰",tp,"دریافت",fa_num(tpa),"#1b5e20","#e8f5e9"),
-    (k4,"🎯",len(orders_df['customer_code'].unique()) if not orders_df.empty else 0,
-     "مشتری با سفارش",f"از {tv} ویزیت","#e65100","#fff3e0"),
-]
-for col,ic,v,lb,sub,clr,bg in kdata:
-    with col:
-        st.markdown(f"""<div class='kpi-box' style='border-color:{clr};background:{bg}'>
-            <div class='kpi-i'>{ic}</div>
-            <div class='kpi-v' style='color:{clr}'>{v}</div>
-            <div class='kpi-l'>{lb}</div>
-            <div class='kpi-s' style='color:{clr}'>{sub}</div>
-        </div>""", unsafe_allow_html=True)
-
-st.markdown("<br>", unsafe_allow_html=True)
+def show_image(rel, caption):
+    p = img_file(rel)
+    if p:
+        st.image(p, caption=caption, width=320)
+    elif rel:
+        st.caption(f"🖼️ {caption}: فایل عکس روی سرور پیدا نشد ({rel})")
 
 
-# ══════════════════════════════════════════════════════
-# نقشه
-# ══════════════════════════════════════════════════════
-st.markdown(f"<div style='font-size:16px;font-weight:800;color:{C1};margin-bottom:10px;direction:rtl'>🗺️ نقشه مسیر</div>", unsafe_allow_html=True)
+@st.dialog("جزئیات", width="large", on_dismiss=_closed)
+def show_stop(s):
+    chips = []
+    if s["visit"] is not None:
+        chips.append(f"<span class='chip' style='background:#edf1ff;color:{KIND_COLOR['visit']}'>ویزیت</span>")
+    if s["orders"]:
+        chips.append(f"<span class='chip' style='background:#f3edff;color:{KIND_COLOR['order']}'>سفارش</span>")
+    if s["pays"]:
+        chips.append(f"<span class='chip' style='background:#e6f6ef;color:{KIND_COLOR['pay']}'>دریافت</span>")
+    st.markdown(f"<div class='dlg-head'>{fa(s['n'])}. {s['customer']} {''.join(chips)}</div>"
+                f"<div class='dlg-meta'>{jdate(s['d'])} · ساعت {hhmm(s['t'])} · {s['visitor']} · کد مشتری {fa(s['customer_code'])}</div>",
+                unsafe_allow_html=True)
 
-if not visits_df.empty:
-    m = folium.Map(location=[visits_df['latitude'].mean(), visits_df['longitude'].mean()], zoom_start=14)
-    pts=[]; n=len(visits_df)
-    for i,(_,row) in enumerate(visits_df.iterrows()):
-        pt=[float(row['latitude']),float(row['longitude'])]; pts.append(pt)
-        step=i+1; color="green" if step==1 else ("red" if step==n else "blue")
-        d_ord=orders_df[orders_df['customer_code']==row['customer_code']] if not orders_df.empty else pd.DataFrame()
-        d_pay=pays_df[pays_df['customer_code']==row['customer_code']] if not pays_df.empty else pd.DataFrame()
+    lat, lng = s.get("lat"), s.get("lng")
+    if lat and lng:
+        b1, b2, _ = st.columns([1, 1, 2])
+        b1.link_button("🗺️ گوگل‌مپ", f"https://www.google.com/maps?q={lat},{lng}", use_container_width=True)
+        b2.link_button("🧭 نشان", f"https://neshan.org/maps/@{lat},{lng},17z", use_container_width=True)
 
-        # popup فشرده - فقط اطلاعات همین ویزیت
-        sp_link = img(row.get("selfie_path",""))
-
-        # فیلتر دقیق: همون مشتری AND همون تاریخ ویزیت
-        visit_date_str = str(row['visit_date'])[:10]
-        d_ord = orders_df[
-            (orders_df['customer_code']==row['customer_code']) &
-            (orders_df['order_date'].astype(str).str[:10]==visit_date_str)
-        ] if not orders_df.empty else pd.DataFrame()
-        d_pay = pays_df[
-            (pays_df['customer_code']==row['customer_code']) &
-            (pays_df['payment_date'].astype(str).str[:10]==visit_date_str)
-        ] if not pays_df.empty else pd.DataFrame()
-
-        ord_txt = f"✔ {fa_num(d_ord['total_amount'].sum())} ({len(d_ord)} فاکتور)" if not d_ord.empty else "❌ بدون سفارش"
-        pay_txt = f"✔ {fa_num(d_pay['amount'].sum())}" if not d_pay.empty else "❌ بدون دریافت"
-        ord_clr = "#6a1b9a" if not d_ord.empty else "#dc2626"
-        pay_clr = "#1b5e20" if not d_pay.empty else "#dc2626"
-
-        selfie_html = (
-            f"<div style=\'margin-top:7px\'>"
-            f"<a href=\'{sp_link}\' target=\'_blank\'>"
-            f"<img src=\'{sp_link}\' style=\'width:100%;height:72px;object-fit:cover;"
-            f"border-radius:7px;border:1.5px solid rgba(255,255,255,.3);display:block\'></a>"
-            f"<div style=\'font-size:9px;color:rgba(255,255,255,.6);text-align:center;margin-top:2px\'>📸 کلیک برای بزرگنمایی</div>"
-            f"</div>"
-        ) if sp_link else ""
-
-        popup_html = (
-            "<div style=\'direction:rtl;font-family:Tahoma,Arial;font-size:11px;"
-            "width:220px;text-align:right;"
-            "animation:pvPop .25s cubic-bezier(.34,1.56,.64,1)\'>"
-            "<style>.leaflet-popup-content-wrapper{border-radius:14px!important;"
-            "box-shadow:0 8px 28px rgba(0,0,0,.22)!important;overflow:hidden!important;padding:0!important}"
-            ".leaflet-popup-content{margin:0!important;width:220px!important}"
-            f"@keyframes pvPop{{from{{opacity:0;transform:scale(.85) translateY(8px)}}to{{opacity:1;transform:scale(1) translateY(0)}}}}</style>"
-            f"<div style=\'background:{C1};color:white;"
-            f"padding:10px 12px 8px\'>"
-            f"<div style=\'font-size:12px;font-weight:bold;margin-bottom:3px\'>📍 {row['C_Name']}</div>"
-            f"<div style=\'font-size:10px;opacity:.75\'>گام {step} از {n}  ·  {to_j(row['visit_date'])}</div>"
-            f"</div>"
-            f"<div style=\'background:white;padding:9px 12px\'>"
-            f"<div style=\'display:flex;justify-content:space-between;align-items:center;"
-            f"padding:5px 0;border-bottom:1px solid #f0f2fa\'>"
-            f"<span style=\'color:#64748b;font-size:10px\'>📦 سفارش</span>"
-            f"<span style=\'color:{ord_clr};font-weight:700;font-size:11px\'>{ord_txt}</span>"
-            f"</div>"
-            f"<div style=\'display:flex;justify-content:space-between;align-items:center;"
-            f"padding:5px 0\'>"
-            f"<span style=\'color:#64748b;font-size:10px\'>💰 دریافت</span>"
-            f"<span style=\'color:{pay_clr};font-weight:700;font-size:11px\'>{pay_txt}</span>"
-            f"</div>"
-            f"{selfie_html}"
-            f"<div style=\'font-size:10px;color:#94a3b8;margin-top:5px;text-align:center\'>"
-            f"⏰ {ct(row['visit_time'])}</div>"
-            f"</div>"
-            "</div>"
-        )
-
-        folium.Marker(pt,
-            popup=folium.Popup(popup_html, max_width=230),
-            tooltip=f"{'🟢' if step==1 else '🔴' if step==n else '🔵'} گام {step}: {row['C_Name']}",
-            icon=folium.Icon(color=color, icon="map-marker")
-        ).add_to(m)
-
-    if len(pts)>1:
-        folium.PolyLine(pts,color=C1,weight=3,opacity=0.7,dash_array='6,4').add_to(m)
-    st_folium(m, height=440, use_container_width=True)
-else:
-    st.info("در این بازه ویزیتی ثبت نشده.")
-
-st.markdown("<br>", unsafe_allow_html=True)
-
-
-# ══════════════════════════════════════════════════════
-# تابع رندر کارت رکورد
-# ══════════════════════════════════════════════════════
-
-
-
-
-# ══════════════════════════════════════════════════════
-# session state
-# ══════════════════════════════════════════════════════
-if 'sel_type' not in st.session_state: st.session_state.sel_type = None
-if 'sel_idx'  not in st.session_state: st.session_state.sel_idx  = None
-
-def set_sel(t, i):
-    st.session_state.sel_type = t
-    st.session_state.sel_idx  = i
-
-def fa(v):
-    try: return f"{float(v):,.0f} ریال"
-    except: return str(v)
-
-# ══════════════════════════════════════════════════════
-# Layout: ستون اصلی + ستون جزئیات سمت راست
-# ══════════════════════════════════════════════════════
-has_detail = st.session_state.sel_type is not None
-
-if has_detail:
-    main_col, detail_col = st.columns([3, 1.4])
-else:
-    main_col = st.container()
-    detail_col = None
-
-
-# ══════════════════════════════════════════════════════
-# ستون اصلی — تب‌ها و لیست‌ها
-# ══════════════════════════════════════════════════════
-with main_col:
-
-    tab1, tab2, tab3 = st.tabs([
-        f"📋 ویزیت‌ها ({tv})",
-        f"📦 سفارشات ({to_})",
-        f"💰 دریافت‌ها ({tp})",
-    ])
-
-    # ─── CSS لیست‌ها ───
-    st.markdown("""
-    <style>
-    .list-row {
-        display:flex; align-items:center; direction:rtl;
-        padding:6px 14px; border-bottom:1px solid #f0f2fa;
-        transition:background .12s; gap:8px;
-    }
-    .list-row:hover { background:#f8faff; }
-    .list-row.selected { background:#eef1fb; }
-    .lr-name  { flex:2; font-size:13px; font-weight:700; color:#1e293b; direction:rtl; }
-    .lr-date  { flex:1.2; font-size:12px; font-weight:700; color:#3949ab; direction:rtl; }
-    .lr-time  { flex:1; font-size:12px; color:#64748b; direction:rtl; }
-    .lr-extra { flex:1.5; font-size:12px; direction:rtl; }
-    .lr-badge { display:inline-block; padding:3px 8px; border-radius:7px;
-                font-size:11px; font-weight:700; }
-    .lr-hdr   { display:flex; align-items:center; direction:rtl;
-                padding:8px 14px; background:#f0f2fa;
-                border-radius:10px 10px 0 0; gap:8px;
-                font-size:11px; font-weight:800; color:#64748b; }
-    </style>
-    """, unsafe_allow_html=True)
-
-
-    # ─── تب ویزیت‌ها ───
-    with tab1:
-        if visits_df.empty:
-            st.info("در این بازه ویزیتی ثبت نشده.")
+    if s["visit"] is not None:
+        v = s["visit"]
+        st.markdown("<div class='sec'>📍 ویزیت</div>", unsafe_allow_html=True)
+        st.markdown(kv([("توضیحات", v["descr"] or "—"), ("مختصات", f"<span dir='ltr'>{fa(f'{lat:.5f}, {lng:.5f}')}</span>" if lat else "—")]),
+                    unsafe_allow_html=True)
+        if v["selfie"]:
+            show_image(v["selfie"], "سلفی ویزیتور")
         else:
-            # هدر
-            st.markdown("""
-            <div class='lr-hdr'>
-                <div style='flex:0.3'>ردیف</div>
-                <div style='flex:2'>نام مشتری</div>
-                <div style='flex:1.2'>تاریخ</div>
-                <div style='flex:1'>ساعت</div>
-                <div style='flex:1.5'>توضیحات</div>
-                <div style='flex:0.7'></div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.caption("سلفی ثبت نشده است.")
 
-            for i, (_, row) in enumerate(visits_df.iterrows()):
-                jdate  = to_j(row['visit_date'])
-                vtime  = ct(row['visit_time'])
-                cname  = row['C_Name']
-                desc   = str(row.get('description','') or '')[:18]
-                is_sel = (st.session_state.sel_type=='v' and st.session_state.sel_idx==i)
-
-                rc = st.columns([0.3, 2, 1.2, 1, 1.5, 0.7])
-                with rc[0]:
-                    st.markdown(f"<div style='padding:5px 4px;font-size:11px;color:#94a3b8;direction:rtl'>{i+1}</div>", unsafe_allow_html=True)
-                with rc[1]:
-                    st.markdown(f"<div style='padding:5px 4px;font-weight:{'900' if is_sel else '600'};color:{'#020025' if is_sel else '#1e293b'};font-size:13px;direction:rtl'>{'🔵' if is_sel else '📍'} {cname}</div>", unsafe_allow_html=True)
-                with rc[2]:
-                    st.markdown(f"<div style='padding:5px 4px;font-size:12px;color:#3949ab;font-weight:700;direction:rtl'>{jdate}</div>", unsafe_allow_html=True)
-                with rc[3]:
-                    st.markdown(f"<div style='padding:5px 4px;font-size:12px;color:#64748b;direction:rtl'>{vtime}</div>", unsafe_allow_html=True)
-                with rc[4]:
-                    st.markdown(f"<div style='padding:5px 4px;font-size:11px;color:#94a3b8;direction:rtl;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{desc}</div>", unsafe_allow_html=True)
-                with rc[5]:
-                    lbl = "✓" if is_sel else "🔍"
-                    if st.button(lbl, key=f"vb_{i}", use_container_width=True,
-                                 type="primary" if is_sel else "secondary"):
-                        if is_sel:
-                            st.session_state.sel_type = None
-                            st.session_state.sel_idx  = None
-                        else:
-                            set_sel('v', i)
-                        st.rerun()
-
-
-
-    # ─── تب سفارشات ───
-    with tab2:
-        if orders_df.empty:
-            st.info("در این بازه سفارشی ثبت نشده.")
+    for o in s["orders"]:
+        st.markdown(f"<div class='sec'>📦 سفارش شمارهٔ {fa(o['id'])} — {money(o['total'])}</div>",
+                    unsafe_allow_html=True)
+        items = load_items(int(o["id"]))
+        if items.empty:
+            st.caption("اقلامی ثبت نشده است.")
         else:
-            st.markdown(f"""<div style='display:flex;gap:8px;margin-bottom:10px;direction:rtl'>
-                <span style='background:#f3e5f5;color:#6a1b9a;padding:4px 12px;border-radius:8px;font-size:12px;font-weight:700'>📦 {to_} فاکتور</span>
-                <span style='background:#d1fae5;color:#065f46;padding:4px 12px;border-radius:8px;font-size:12px;font-weight:700'>💰 جمع: {fa_num(toa)}</span>
-            </div>""", unsafe_allow_html=True)
+            st.dataframe(pd.DataFrame({
+                "جمع": [money(q * p) for q, p in zip(items.qty, items.price)],
+                "قیمت واحد": [money(p) for p in items.price],
+                "تعداد": [fa(f"{q:g}") for q in items.qty],
+                "کالا": items.name,
+            }), hide_index=True, use_container_width=True)
 
-            st.markdown("""
-            <div class='lr-hdr'>
-                <div style='flex:0.3'>ردیف</div>
-                <div style='flex:2'>نام مشتری</div>
-                <div style='flex:1.2'>تاریخ</div>
-                <div style='flex:1'>ساعت</div>
-                <div style='flex:1.5'>جمع فاکتور</div>
-                <div style='flex:0.7'></div>
-            </div>
-            """, unsafe_allow_html=True)
-
-            for i, (_, order) in enumerate(orders_df.iterrows()):
-                jdate  = to_j(order['order_date'])
-                otime  = ct(order['order_time'])
-                cname  = order['C_Name']
-                amt    = fa_num(order['total_amount'])
-                is_sel = (st.session_state.sel_type=='o' and st.session_state.sel_idx==i)
-
-                rc = st.columns([0.3, 2, 1.2, 1, 1.5, 0.7])
-                with rc[0]:
-                    st.markdown(f"<div style='padding:5px 4px;font-size:11px;color:#94a3b8'>{i+1}</div>", unsafe_allow_html=True)
-                with rc[1]:
-                    st.markdown(f"<div style='padding:5px 4px;font-weight:{'900' if is_sel else '600'};color:{'#020025' if is_sel else '#1e293b'};font-size:13px;direction:rtl'>{'🔵' if is_sel else '📦'} {cname}</div>", unsafe_allow_html=True)
-                with rc[2]:
-                    st.markdown(f"<div style='padding:5px 4px;font-size:12px;color:#3949ab;font-weight:700;direction:rtl'>{jdate}</div>", unsafe_allow_html=True)
-                with rc[3]:
-                    st.markdown(f"<div style='padding:5px 4px;font-size:12px;color:#64748b;direction:rtl'>{otime}</div>", unsafe_allow_html=True)
-                with rc[4]:
-                    st.markdown(f"<div style='padding:5px 4px;font-size:13px;font-weight:800;color:#7b1fa2;direction:rtl'>{amt}</div>", unsafe_allow_html=True)
-                with rc[5]:
-                    lbl = "✓" if is_sel else "🔍"
-                    if st.button(lbl, key=f"ob_{i}", use_container_width=True,
-                                 type="primary" if is_sel else "secondary"):
-                        if is_sel:
-                            st.session_state.sel_type = None
-                            st.session_state.sel_idx  = None
-                        else:
-                            set_sel('o', i)
-                        st.rerun()
+    for p in s["pays"]:
+        st.markdown(f"<div class='sec'>💰 دریافت {p['ptype']} — {money(p['amount'])}</div>", unsafe_allow_html=True)
+        if p["ptype"] == "چک":
+            st.markdown(kv([("شماره چک", fa(p["check_number"])), ("شماره صیادی", fa(p["check_sayyadi"])),
+                            ("سررسید", jdate(p["check_due"]) if p["check_due"] else "—")]), unsafe_allow_html=True)
+            show_image(p["check_img"], "عکس چک")
+        elif p["ptype"] == "حواله":
+            st.markdown(kv([("حساب / کارت مقصد", fa(p["tr_account"])),
+                            ("شماره پیگیری", fa(p["tr_tracking"] or p["tracking"]))]), unsafe_allow_html=True)
+            show_image(p["tr_img"], "عکس رسید حواله")
 
 
+# ══════════════════════════════════════════════
+# نقشه + لیست
+# ══════════════════════════════════════════════
+ver = st.session_state.setdefault("ui_ver", 0)
+to_open = None
+col_map, col_list = st.columns([1.55, 1], gap="medium")
 
-    # ─── تب دریافت‌ها ───
-    with tab3:
-        if pays_df.empty:
-            st.info("در این بازه دریافتی ثبت نشده.")
-        else:
-            cash_s  = pays_df[pays_df['payment_type']=='نقدی']['amount'].sum()
-            check_s = pays_df[pays_df['payment_type']=='چک']['amount'].sum()
-            trans_s = pays_df[pays_df['payment_type']=='حواله']['amount'].sum()
+with col_map:
+    pts = [s for s in stops if s.get("lat") and s.get("lng")]
+    visitor_ids = sorted({int(s["visitor_id"]) for s in stops})
+    vcolor = {vid: VISITOR_COLORS[i % len(VISITOR_COLORS)] for i, vid in enumerate(visitor_ids)}
+    names = {int(s["visitor_id"]): s["visitor"] for s in stops}
+    if len(visitor_ids) > 1:
+        st.markdown("<div class='legend'>" + "".join(
+            f"<span><i style='background:{vcolor[v]}'></i>{names[v]}</span>" for v in visitor_ids) + "</div>",
+            unsafe_allow_html=True)
 
-            kc1,kc2,kc3,kc4 = st.columns(4)
-            for col,ic2,v,lb,clr,bg in [
-                (kc1,"💰",tpa,    "جمع کل","#1b5e20","#e8f5e9"),
-                (kc2,"💵",cash_s, "نقدی",  "#0d47a1","#e3f2fd"),
-                (kc3,"📋",check_s,"چک",    "#880e4f","#fce4ec"),
-                (kc4,"🏦",trans_s,"حواله", "#e65100","#fff3e0"),
-            ]:
-                with col:
-                    st.markdown(f"""<div class='kpi-box' style='border-color:{clr};background:{bg};padding:12px 8px'>
-                        <div style='font-size:20px'>{ic2}</div>
-                        <div style='font-size:17px;font-weight:900;color:{clr}'>{fa_num(v)}</div>
-                        <div style='font-size:11px;color:#64748b;font-weight:600'>{lb}</div>
-                    </div>""", unsafe_allow_html=True)
+    m = folium.Map(location=[35.6997, 51.3380], zoom_start=11, control_scale=True, tiles="OpenStreetMap")
+    m.get_root().header.add_child(folium.Element(font_css().replace("<style>", "<style>\n").replace(
+        ".stApp *", "body *") + """
+<style>
+.leaflet-tooltip.pv-tip { direction:rtl; text-align:right; padding:8px 10px; border-radius:10px;
+  border:1px solid #dfe3ea; box-shadow:0 6px 18px rgba(16,24,40,.16); font-family:Vazirmatn,Tahoma,sans-serif; }
+.pv-tip .h { font-weight:800; font-size:13px; color:#17202e; }
+.pv-tip .m { font-size:11px; color:#6b7686; margin:1px 0 4px; }
+.pv-tip img { display:block; width:200px; max-height:140px; object-fit:cover; border-radius:8px; margin:4px 0; }
+.pv-tip .b { display:inline-block; font-size:11px; font-weight:700; border-radius:12px; padding:1px 8px; margin:2px 0 0 4px; }
+.pv-tip .f { font-size:10px; color:#868e96; margin-top:4px; }
+.pv-cl { width:36px; height:36px; border-radius:50%; background:#020025; color:#fff; border:3px solid #fff;
+  font:800 13px Vazirmatn,Tahoma,sans-serif; display:flex; align-items:center; justify-content:center;
+  box-shadow:0 1px 5px rgba(0,0,0,.4); }
+.pv-pin { width:28px; height:28px; border-radius:50%; color:#fff; font:700 12px Vazirmatn,Tahoma,sans-serif;
+  display:flex; align-items:center; justify-content:center; border:2px solid #fff; box-shadow:0 1px 4px rgba(0,0,0,.35); }
+</style>"""))
 
-            st.markdown("<br>", unsafe_allow_html=True)
+    # مسیر هر ویزیتور در هر روز
+    routes = {}
+    for s in pts:
+        routes.setdefault((int(s["visitor_id"]), str(s["d"])), []).append([float(s["lat"]), float(s["lng"])])
+    for (vid, _), line in routes.items():
+        if len(line) > 1:
+            folium.PolyLine(line, color=vcolor[vid], weight=3, opacity=.55, dash_array="6 6").add_to(m)
 
-            st.markdown("""
-            <div class='lr-hdr'>
-                <div style='flex:0.3'>ردیف</div>
-                <div style='flex:2'>نام مشتری</div>
-                <div style='flex:1.2'>تاریخ</div>
-                <div style='flex:1'>ساعت</div>
-                <div style='flex:0.9'>نوع</div>
-                <div style='flex:1.5'>مبلغ</div>
-                <div style='flex:0.7'></div>
-            </div>
-            """, unsafe_allow_html=True)
+    # نشانگرهای نزدیک به هم گروه می‌شوند (عدد = تعداد)؛ کلیک = بزرگ‌نمایی،
+    # و در بیشترین بزرگ‌نمایی نشانگرهای هم‌مکان باز می‌شوند تا همه قابل کلیک باشند
+    cluster = MarkerCluster(
+        options={"maxClusterRadius": 34, "spiderfyOnMaxZoom": True, "showCoverageOnHover": False,
+                 "spiderfyDistanceMultiplier": 1.7},
+        icon_create_function="""function(c){return L.divIcon({className:'',iconSize:[36,36],
+            html:'<div class="pv-cl">'+c.getChildCount().toLocaleString('fa-IR')+'</div>'});}""",
+    ).add_to(m)
 
-            for i, (_, pay) in enumerate(pays_df.iterrows()):
-                jdate  = to_j(pay['payment_date'])
-                ptime  = ct(pay['payment_time'])
-                ptype  = pay.get('payment_type','')
-                icon   = "💵" if ptype=="نقدی" else "📋" if ptype=="چک" else "🏦"
-                bg_t   = "#e3f2fd" if ptype=="نقدی" else "#fce4ec" if ptype=="چک" else "#fff3e0"
-                fc_t   = "#0d47a1" if ptype=="نقدی" else "#880e4f" if ptype=="چک" else "#e65100"
-                is_sel = (st.session_state.sel_type=='p' and st.session_state.sel_idx==i)
+    for s in pts:
+        badges = ""
+        if s["orders"]:
+            badges += f"<span class='b' style='background:#f3edff;color:{KIND_COLOR['order']}'>سفارش {money(sum(o['total'] or 0 for o in s['orders']))}</span>"
+        for p in s["pays"]:
+            badges += f"<span class='b' style='background:#e6f6ef;color:{KIND_COLOR['pay']}'>{p['ptype']} {money(p['amount'])}</span>"
+        tip = (f"<div class='h'>{fa(s['n'])}. {s['customer']}</div>"
+               f"<div class='m'>{jdate(s['d'])} · {hhmm(s['t'])} · {s['visitor']}</div>"
+               f"{thumb_tag(s['visit']['selfie']) if s['visit'] is not None else ''}{badges}"
+               f"<div class='f'>برای جزئیات کلیک کنید</div>")
+        color = vcolor[int(s["visitor_id"])] if len(visitor_ids) > 1 else KIND_COLOR[s["kind"]]
+        folium.Marker(
+            [float(s["lat"]), float(s["lng"])],
+            icon=folium.DivIcon(html=f"<div class='pv-pin' style='background:{color}'>{fa(s['n'])}</div>",
+                                icon_size=(28, 28), icon_anchor=(14, 14)),
+            tooltip=folium.Tooltip(tip, class_name="pv-tip", sticky=False),
+        ).add_to(cluster)
+    if pts:
+        lats = [float(s["lat"]) for s in pts]
+        lngs = [float(s["lng"]) for s in pts]
+        m.fit_bounds([[min(lats), min(lngs)], [max(lats), max(lngs)]], padding=(30, 30), max_zoom=16)
 
-                rc = st.columns([0.3, 2, 1.2, 1, 0.9, 1.5, 0.7])
-                with rc[0]:
-                    st.markdown(f"<div style='padding:5px 4px;font-size:11px;color:#94a3b8'>{i+1}</div>", unsafe_allow_html=True)
-                with rc[1]:
-                    st.markdown(f"<div style='padding:5px 4px;font-weight:{'900' if is_sel else '600'};color:{'#020025' if is_sel else '#1e293b'};font-size:13px;direction:rtl'>{'🔵' if is_sel else icon+' '}{pay['C_Name']}</div>", unsafe_allow_html=True)
-                with rc[2]:
-                    st.markdown(f"<div style='padding:5px 4px;font-size:12px;color:#3949ab;font-weight:700;direction:rtl'>{jdate}</div>", unsafe_allow_html=True)
-                with rc[3]:
-                    st.markdown(f"<div style='padding:5px 4px;font-size:12px;color:#64748b;direction:rtl'>{ptime}</div>", unsafe_allow_html=True)
-                with rc[4]:
-                    st.markdown(f"<div style='padding:8px 4px'><span style='background:{bg_t};color:{fc_t};padding:3px 8px;border-radius:7px;font-size:11px;font-weight:700'>{ptype}</span></div>", unsafe_allow_html=True)
-                with rc[5]:
-                    st.markdown(f"<div style='padding:5px 4px;font-size:13px;font-weight:800;color:#1b5e20;direction:rtl'>{fa_num(pay['amount'])}</div>", unsafe_allow_html=True)
-                with rc[6]:
-                    lbl = "✓" if is_sel else "🔍"
-                    if st.button(lbl, key=f"pb_{i}", use_container_width=True,
-                                 type="primary" if is_sel else "secondary"):
-                        if is_sel:
-                            st.session_state.sel_type = None
-                            st.session_state.sel_idx  = None
-                        else:
-                            set_sel('p', i)
-                        st.rerun()
-
-
-
-
-# ══════════════════════════════════════════════════════
-# ستون جزئیات سمت راست
-# ══════════════════════════════════════════════════════
-if has_detail and detail_col is not None:
-    t   = st.session_state.sel_type
-    idx = st.session_state.sel_idx
-
-    with detail_col:
-
-        st.markdown("""
-        <style>
-        .dp-wrap {
-            background: white; border-radius: 14px;
-            overflow: hidden; border: 1.5px solid #dde3f0;
-            box-shadow: 0 6px 24px rgba(2,0,37,.12);
-            direction: rtl; font-family: 'Vazirmatn',Tahoma,sans-serif;
-        }
-        .dp-head {
-            padding: 13px 15px; color: white;
-        }
-        .dp-title { font-size: 13px; font-weight: 900; margin-bottom: 2px; }
-        .dp-sub   { font-size: 11px; opacity: .75; }
-        .dp-body  { padding: 12px 12px 8px; }
-        .dp-cell  {
-            background: #f8fafc; border-radius: 9px;
-            padding: 8px 11px; margin-bottom: 7px;
-            border: 1px solid #e8edf5; direction: rtl;
-        }
-        .dp-lbl { font-size: 10px; font-weight: 700; color: #94a3b8; margin-bottom: 2px; }
-        .dp-val { font-size: 13px; font-weight: 700; color: #1e293b; word-break: break-all; }
-        .dp-section {
-            font-size: 11px; font-weight: 800; color: #020025;
-            border-top: 1px solid #f0f2fa;
-            padding: 7px 0 5px; margin-top: 2px;
-        }
-        .dp-img {
-            width: 100%; border-radius: 9px;
-            border: 2px solid #e2e8f0; cursor: zoom-in;
-            display: block; margin-top: 5px;
-            transition: border-color .2s;
-        }
-        .dp-img:hover { border-color: #4f6ef7; }
-        .dp-extra {
-            border-radius: 9px; padding: 9px 11px;
-            margin-bottom: 7px; direction: rtl;
-            font-size: 12px; line-height: 1.9;
-        }
-        .dp-item {
-            background: #f8fafc; border-radius: 8px;
-            padding: 7px 10px; margin-bottom: 5px;
-            border: 1px solid #e8edf5; direction: rtl;
-        }
-        .dp-item-name { font-size: 12px; font-weight: 700; color: #1e293b; margin-bottom: 3px; }
-        .dp-item-sub  { display: flex; justify-content: space-between; font-size: 11px; color: #64748b; }
-        .dp-total {
-            background: #f3e5f5; border-radius: 8px;
-            padding: 9px 12px; display: flex;
-            justify-content: space-between; margin-top: 4px;
-            direction: rtl;
-        }
-        </style>
-        """, unsafe_allow_html=True)
-
-        # ─── ویزیت ───
-        if t == 'v' and idx < len(visits_df):
-            row   = visits_df.iloc[idx]
-            jdate = to_j(row['visit_date'])
-            vtime = ct(row['visit_time'])
-            sp    = img(row.get('selfie_path',''))
-
-            # هد
-            st.markdown(
-                "<div class='dp-wrap'>"
-                "<div class='dp-head' style='background:#3949ab'>"
-                f"<div class='dp-title'>📍 {row['C_Name']}</div>"
-                f"<div class='dp-sub'>{jdate} · {vtime}</div>"
-                "</div><div class='dp-body'>"
-                f"<div class='dp-cell'><div class='dp-lbl'>کد مشتری</div><div class='dp-val'>{row['customer_code']}</div></div>"
-                f"<div class='dp-cell'><div class='dp-lbl'>تاریخ</div><div class='dp-val'>{jdate}</div></div>"
-                f"<div class='dp-cell'><div class='dp-lbl'>ساعت</div><div class='dp-val'>{vtime}</div></div>"
-                f"<div class='dp-cell'><div class='dp-lbl'>توضیحات</div><div class='dp-val' style='font-size:12px'>{row.get('description','') or '—'}</div></div>",
-                unsafe_allow_html=True
-            )
-            if sp:
-                st.markdown(
-                    "<div class='dp-section'>📸 سلفی حضور</div>"
-                    f"<a href='{sp}' target='_blank'><img class='dp-img' src='{sp}'></a>"
-                    "<div style='text-align:center;font-size:10px;color:#94a3b8;margin-top:3px;direction:rtl'>کلیک برای بزرگنمایی</div>",
-                    unsafe_allow_html=True
-                )
-            else:
-                st.markdown(
-                    "<div class='dp-cell' style='text-align:center;color:#94a3b8;font-size:12px'>📷 بدون سلفی</div>",
-                    unsafe_allow_html=True
-                )
-            st.markdown("</div></div>", unsafe_allow_html=True)
-
-        # ─── سفارش ───
-        elif t == 'o' and idx < len(orders_df):
-            order = orders_df.iloc[idx]
-            jdate = to_j(order['order_date'])
-            otime = ct(order['order_time'])
-
-            st.markdown(
-                "<div class='dp-wrap'>"
-                "<div class='dp-head' style='background:#7b1fa2'>"
-                f"<div class='dp-title'>📦 {order['C_Name']}</div>"
-                f"<div class='dp-sub'>{jdate} · {fa_num(order['total_amount'])}</div>"
-                "</div><div class='dp-body'>"
-                f"<div class='dp-cell'><div class='dp-lbl'>تاریخ</div><div class='dp-val'>{jdate}</div></div>"
-                f"<div class='dp-cell'><div class='dp-lbl'>ساعت</div><div class='dp-val'>{otime}</div></div>"
-                f"<div class='dp-cell'><div class='dp-lbl'>جمع فاکتور</div>"
-                f"<div class='dp-val' style='color:#7b1fa2;font-size:15px'>{fa_num(order['total_amount'])}</div></div>"
-                "<div class='dp-section'>📋 اقلام سفارش</div>",
-                unsafe_allow_html=True
-            )
-            try:
-                conn_it = get_conn()
-                its = pd.read_sql("""
-                    SELECT ISNULL(CAST(a.A_Name AS NVARCHAR(200)),oi.article_code) AS nm,
-                           CAST(oi.quantity AS FLOAT) AS qty,
-                           CAST(oi.price AS BIGINT)   AS prc,
-                           CAST(oi.quantity*oi.price AS BIGINT) AS tot
-                    FROM order_items oi
-                    LEFT JOIN dejavuDB1.dbo.article a ON oi.article_code=a.A_Code
-                    WHERE oi.order_id=?
-                """, conn_it, params=(int(order['id']),))
-                conn_it.close()
-                if not its.empty:
-                    items_html = ""
-                    for _, it in its.iterrows():
-                        items_html += (
-                            "<div class='dp-item'>"
-                            f"<div class='dp-item-name'>{it['nm']}</div>"
-                            "<div class='dp-item-sub'>"
-                            f"<span>{it['qty']:g} عدد × {it['prc']:,}</span>"
-                            f"<span style='font-weight:800;color:#7b1fa2'>{it['tot']:,} ریال</span>"
-                            "</div></div>"
-                        )
-                    total_html = (
-                        "<div class='dp-total'>"
-                        "<span style='color:#64748b;font-weight:600;font-size:12px'>جمع کل:</span>"
-                        f"<span style='color:#7b1fa2;font-weight:900;font-size:14px'>{fa_num(order['total_amount'])}</span>"
-                        "</div>"
-                    )
-                    st.markdown(items_html + total_html, unsafe_allow_html=True)
-            except Exception as e:
-                st.error(f"خطا: {e}")
-            st.markdown("</div></div>", unsafe_allow_html=True)
-
-        # ─── دریافت ───
-        elif t == 'p' and idx < len(pays_df):
-            pay   = pays_df.iloc[idx]
-            jdate = to_j(pay['payment_date'])
-            ptime = ct(pay['payment_time'])
-            ptype = pay.get('payment_type','')
-            icon  = "💵" if ptype=="نقدی" else "📋" if ptype=="چک" else "🏦"
-            clr_p = "#0d47a1" if ptype=="نقدی" else "#880e4f" if ptype=="چک" else "#e65100"
-            chk_i = img(pay.get('check_image_path',''))
-            tr_i  = img(pay.get('transfer_image_path',''))
-
-            st.markdown(
-                "<div class='dp-wrap'>"
-                f"<div class='dp-head' style='background:{clr_p}'>"
-                f"<div class='dp-title'>{icon} {pay['C_Name']}</div>"
-                f"<div class='dp-sub'>{jdate} · {ptype}</div>"
-                "</div><div class='dp-body'>"
-                f"<div class='dp-cell'><div class='dp-lbl'>مشتری</div><div class='dp-val'>{pay['C_Name']}</div></div>"
-                f"<div class='dp-cell'><div class='dp-lbl'>تاریخ</div><div class='dp-val'>{jdate}</div></div>"
-                f"<div class='dp-cell'><div class='dp-lbl'>ساعت</div><div class='dp-val'>{ptime}</div></div>"
-                f"<div class='dp-cell'><div class='dp-lbl'>مبلغ دریافتی</div>"
-                f"<div class='dp-val' style='color:#1b5e20;font-size:15px'>{fa_num(pay['amount'])}</div></div>",
-                unsafe_allow_html=True
-            )
-
-            # اطلاعات چک یا حواله
-            if ptype == "چک":
-                due = to_j(pay.get('check_due_date')) if pay.get('check_due_date') else '—'
-                st.markdown(
-                    "<div class='dp-section'>📋 اطلاعات چک</div>"
-                    "<div class='dp-extra' style='background:#fce4ec;border:1px solid #f48fb1'>"
-                    f"<b>شماره چک:</b> {pay.get('check_number','—')}<br>"
-                    f"<b>شماره صیادی:</b> {pay.get('check_sayyadi','—')}<br>"
-                    f"<b>تاریخ سررسید:</b> {due}"
-                    "</div>",
-                    unsafe_allow_html=True
-                )
-            elif ptype == "حواله":
-                st.markdown(
-                    "<div class='dp-section'>🏦 اطلاعات حواله</div>"
-                    "<div class='dp-extra' style='background:#e3f2fd;border:1px solid #90caf9'>"
-                    f"<b>حساب مقصد:</b> {pay.get('transfer_account','—')}<br>"
-                    f"<b>شماره پیگیری:</b> {pay.get('tracking_number','—')}"
-                    "</div>",
-                    unsafe_allow_html=True
-                )
-
-            # عکس‌ها
-            if chk_i:
-                st.markdown(
-                    "<div class='dp-section'>📸 عکس چک</div>"
-                    f"<a href='{chk_i}' target='_blank'><img class='dp-img' src='{chk_i}'></a>",
-                    unsafe_allow_html=True
-                )
-            if tr_i:
-                st.markdown(
-                    "<div class='dp-section'>📸 رسید حواله</div>"
-                    f"<a href='{tr_i}' target='_blank'><img class='dp-img' src='{tr_i}'></a>",
-                    unsafe_allow_html=True
-                )
-
-            st.markdown("</div></div>", unsafe_allow_html=True)
-
-        # دکمه بستن
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("✕ بستن پانل", use_container_width=True):
-            st.session_state.sel_type = None
-            st.session_state.sel_idx  = None
-            st.rerun()
+    out = st_folium(m, key=f"map_{ver}", height=620, use_container_width=True,
+                    returned_objects=["last_object_clicked_tooltip"])
+    tip_txt = (out or {}).get("last_object_clicked_tooltip") or ""
+    mt = re.match(r"\s*([0-9۰-۹]+)\.", tip_txt.translate(_EN) if tip_txt else "")
+    if mt:
+        to_open = int(mt.group(1).translate(_EN))
+    if not stops:
+        st.info("در این بازه ثبتی وجود ندارد. بازه یا ویزیتور را تغییر دهید.")
 
 
-
-def make_excel_visits():
-    out = io.BytesIO()
-    with pd.ExcelWriter(out, engine='xlsxwriter') as w:
-        wb = w.book
-        hf = wb.add_format({'bold':True,'bg_color':'#020025','font_color':'white','align':'right','font_name':'Tahoma','border':1})
-        cf = wb.add_format({'align':'right','font_name':'Tahoma','border':1})
-        if not visits_df.empty:
-            ws = wb.add_worksheet('ویزیت‌ها'); ws.right_to_left()
-            hdrs = ['نام مشتری','کد مشتری','تاریخ شمسی','ساعت','توضیحات']
-            for ci,h in enumerate(hdrs): ws.write(0,ci,h,hf); ws.set_column(ci,ci,20)
-            for ri,(_,row) in enumerate(visits_df.iterrows()):
-                vals = [row['C_Name'],row['customer_code'],to_j(row['visit_date']),ct(row['visit_time']),row.get('description','')]
-                for ci,v in enumerate(vals): ws.write(ri+1,ci,str(v) if v else '',cf)
-    return out.getvalue()
-
-def make_excel_orders():
-    out = io.BytesIO()
-    with pd.ExcelWriter(out, engine='xlsxwriter') as w:
-        wb = w.book
-        hf = wb.add_format({'bold':True,'bg_color':'#7b1fa2','font_color':'white','align':'right','font_name':'Tahoma','border':1})
-        cf = wb.add_format({'align':'right','font_name':'Tahoma','border':1})
-        nf = wb.add_format({'align':'right','font_name':'Tahoma','border':1,'num_format':'#,##0'})
-        if not orders_df.empty:
-            ws = wb.add_worksheet('سفارشات'); ws.right_to_left()
-            hdrs = ['نام مشتری','کد مشتری','تاریخ شمسی','ساعت','جمع فاکتور (ریال)']
-            for ci,h in enumerate(hdrs): ws.write(0,ci,h,hf); ws.set_column(ci,ci,20)
-            for ri,(_,row) in enumerate(orders_df.iterrows()):
-                ws.write(ri+1,0,row['C_Name'],cf)
-                ws.write(ri+1,1,row['customer_code'],cf)
-                ws.write(ri+1,2,to_j(row['order_date']),cf)
-                ws.write(ri+1,3,ct(row['order_time']),cf)
-                ws.write(ri+1,4,float(row['total_amount']),nf)
-    return out.getvalue()
-
-def make_excel_pays():
-    out = io.BytesIO()
-    with pd.ExcelWriter(out, engine='xlsxwriter') as w:
-        wb = w.book
-        hf = wb.add_format({'bold':True,'bg_color':'#1b5e20','font_color':'white','align':'right','font_name':'Tahoma','border':1})
-        cf = wb.add_format({'align':'right','font_name':'Tahoma','border':1})
-        nf = wb.add_format({'align':'right','font_name':'Tahoma','border':1,'num_format':'#,##0'})
-        p_all = qry("""
-            SELECT ISNULL(CAST(c.C_Name AS NVARCHAR(200)),p.customer_code) AS [نام مشتری],
-                   p.customer_code AS [کد مشتری],
-                   CONVERT(VARCHAR,p.payment_date,23) AS [تاریخ],
-                   CONVERT(VARCHAR,p.payment_time,108) AS [ساعت],
-                   p.payment_type AS [نوع دریافت],
-                   p.amount AS [مبلغ ریال],
-                   ISNULL(p.check_number,'') AS [شماره چک],
-                   ISNULL(p.check_sayyadi,'') AS [شماره صیادی],
-                   ISNULL(p.transfer_account,'') AS [حساب مقصد],
-                   ISNULL(p.tracking_number,'') AS [شماره پیگیری]
-            FROM payments p
-            LEFT JOIN dejavuDB1.dbo.customer c ON p.customer_code=c.C_Code
-            WHERE p.visitor_id=? AND p.payment_date BETWEEN ? AND ?
-            ORDER BY p.payment_date,p.payment_time
-        """, (sel_vid,g0,g1))
-        if not p_all.empty:
-            ws = wb.add_worksheet('دریافت‌ها'); ws.right_to_left()
-            cols = list(p_all.columns)
-            cols.insert(1,'تاریخ شمسی')
-            for ci,h in enumerate(cols): ws.write(0,ci,h,hf); ws.set_column(ci,ci,20)
-            for ri,(_,row) in enumerate(p_all.iterrows()):
-                ws.write(ri+1,0,str(row.get('نام مشتری','')),cf)
-                ws.write(ri+1,1,to_j(str(row.get('تاریخ',''))),cf)
-                for ci2,col in enumerate(p_all.columns[1:], 2):
-                    v = row.get(col,'')
-                    if col=='مبلغ ریال':
-                        try: ws.write(ri+1,ci2,float(v),nf)
-                        except: ws.write(ri+1,ci2,'',cf)
-                    else:
-                        ws.write(ri+1,ci2,str(v) if v else '',cf)
-    return out.getvalue()
+def table(rows, cols, key, height=540):
+    if not rows:
+        st.caption("موردی در این بازه نیست.")
+        return None
+    df = pd.DataFrame(rows)[cols[::-1]]          # ستون اول در سمت راست دیده شود
+    ev = st.dataframe(df.drop(columns=["_n"]) if "_n" in df else df, hide_index=True,
+                      use_container_width=True, height=height, key=key,
+                      on_select="rerun", selection_mode="single-row")
+    sel = ev.selection.rows if ev and ev.selection else []
+    return rows[sel[0]]["_n"] if sel else None
 
 
-ec1, ec2, ec3 = st.columns(3)
-with ec1:
-    st.download_button("📥 Excel ویزیت‌ها", data=make_excel_visits(),
-        file_name=f"Visits_{j0.strftime('%Y%m%d')}_{j1.strftime('%Y%m%d')}.xlsx",
-        mime="application/vnd.ms-excel", use_container_width=True)
-with ec2:
-    st.download_button("📥 Excel سفارشات", data=make_excel_orders(),
-        file_name=f"Orders_{j0.strftime('%Y%m%d')}_{j1.strftime('%Y%m%d')}.xlsx",
-        mime="application/vnd.ms-excel", use_container_width=True)
-with ec3:
-    st.download_button("📥 Excel دریافت‌ها", data=make_excel_pays(),
-        file_name=f"Payments_{j0.strftime('%Y%m%d')}_{j1.strftime('%Y%m%d')}.xlsx",
-        mime="application/vnd.ms-excel", use_container_width=True)
+with col_list:
+    t_v, t_o, t_p = st.tabs([f"ویزیت‌ها ({fa(len(visits))})", f"سفارش‌ها ({fa(len(orders))})",
+                             f"دریافت‌ها ({fa(len(pays))})"])
+    with t_v:
+        rows = [{"_n": s["n"], "#": fa(s["n"]), "مشتری": s["customer"], "ویزیتور": s["visitor"],
+                 "تاریخ": jdate(s["d"]), "ساعت": hhmm(s["t"]),
+                 "ثبت‌ها": " + ".join(x for x in ["سفارش" if s["orders"] else "", "دریافت" if s["pays"] else ""] if x)}
+                for s in stops if s["visit"] is not None]
+        n = table(rows, ["#", "مشتری", "ویزیتور", "تاریخ", "ساعت", "ثبت‌ها", "_n"], f"tv_{ver}")
+        to_open = n or to_open
+    with t_o:
+        rows = [{"_n": s["n"], "#": fa(s["n"]), "مشتری": s["customer"], "ویزیتور": s["visitor"],
+                 "تاریخ": jdate(o["d"]), "ساعت": hhmm(o["t"]), "مبلغ": money(o["total"])}
+                for s in stops for o in s["orders"]]
+        n = table(rows, ["#", "مشتری", "ویزیتور", "تاریخ", "ساعت", "مبلغ", "_n"], f"to_{ver}")
+        to_open = n or to_open
+    with t_p:
+        rows = [{"_n": s["n"], "#": fa(s["n"]), "مشتری": s["customer"], "ویزیتور": s["visitor"],
+                 "تاریخ": jdate(p["d"]), "نوع": p["ptype"], "مبلغ": money(p["amount"])}
+                for s in stops for p in s["pays"]]
+        n = table(rows, ["#", "مشتری", "ویزیتور", "تاریخ", "نوع", "مبلغ", "_n"], f"tp_{ver}")
+        to_open = n or to_open
 
-st.markdown(f"""
-<div class='dash-footer'>
-    <a href='https://peecha.ir' target='_blank'>🌐 peecha.ir</a>
-    &nbsp;|&nbsp; پیچا ویزیت | PeechaVisit © ۱۴۰۵ &nbsp;|&nbsp; نسخه ۵.۱
-</div>
-""", unsafe_allow_html=True)
+if to_open and to_open in stop_by_n:
+    show_stop(stop_by_n[to_open])

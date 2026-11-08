@@ -9,7 +9,7 @@ flask-cors>=4.0
 pyodbc>=5.0
 
 # داشبورد و پنل مدیریت  (dashboard.py / admin.py)
-streamlit>=1.32
+streamlit>=1.50
 pandas>=2.0
 
 # نقشه در داشبورد

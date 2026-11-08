@@ -9,6 +9,10 @@ if not exist ".venv\Scripts\python.exe" (
     exit /b 1
 )
 
+REM close windows left from a previous start, so old code never keeps running
+taskkill /FI "WINDOWTITLE eq PeechaVisit*" /T /F >nul 2>&1
+timeout /t 2 >nul
+
 start "PeechaVisit API - port 5000" cmd /k .venv\Scripts\python.exe app.py
 start "PeechaVisit Web App - port 8000" cmd /k .venv\Scripts\python.exe run_client.py
 start "PeechaVisit Dashboard - port 8501" cmd /k .venv\Scripts\python.exe -m streamlit run dashboard.py --server.port 8501

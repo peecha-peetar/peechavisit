@@ -206,7 +206,8 @@ def login():
 @require_auth
 def sync_data():
     # تنظیمات اپ موبایل هر بار تازه از settings.json خوانده می‌شود (بدون ری‌استارت)
-    rules = config.current_settings()["MOBILE"]
+    # (config.py قدیمی بدون MOBILE → اپ پیش‌فرض‌های خودش را به کار می‌برد)
+    rules = config.current_settings().get("MOBILE") or {}
     step = 'اتصال به دیتابیس فروش'
     try:
         conn = get_conn(SALES_DB); cur = conn.cursor()
@@ -229,7 +230,7 @@ def sync_data():
                      for r in cur.fetchall()]
 
         step = 'خواندن کالاها'
-        stock_filter = "AND Exist > 0" if rules["ONLY_IN_STOCK"] else ""
+        stock_filter = "AND Exist > 0" if rules.get("ONLY_IN_STOCK") else ""
         cur.execute(f"""
             SELECT CAST(A_Code AS NVARCHAR(50)), CAST(A_Name AS NVARCHAR(200)), Sel_Price, Exist
             FROM article WHERE ([Delete]=0 OR [Delete] IS NULL) {stock_filter}

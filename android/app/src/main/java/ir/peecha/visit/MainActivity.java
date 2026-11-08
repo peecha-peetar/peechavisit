@@ -13,8 +13,13 @@ import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.Color;
+import android.graphics.Insets;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.view.WindowInsets;
+import android.widget.FrameLayout;
 import android.webkit.GeolocationPermissions;
 import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
@@ -66,7 +71,12 @@ public class MainActivity extends Activity {
                 .build();
 
         webView = new WebView(this);
-        setContentView(webView);
+        FrameLayout root = new FrameLayout(this);
+        root.setBackgroundColor(Color.parseColor("#020025"));   // رنگ پشت نوار وضعیت
+        root.addView(webView, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        setContentView(root);
+        applySystemBarInsets(root);
 
         WebSettings s = webView.getSettings();
         s.setJavaScriptEnabled(true);
@@ -122,6 +132,21 @@ public class MainActivity extends Activity {
 
         if (savedInstanceState != null) webView.restoreState(savedInstanceState);
         else webView.loadUrl(START_URL);
+    }
+
+    // ── نوار وضعیت / ناوبری / کیبورد ──
+    // اندروید ۱۵ (targetSdk 35) محتوا را زیر نوار وضعیت می‌کشد؛ آن فضا را
+    // به‌صورت padding خالی می‌گذاریم تا هدر اپ زیر ساعت و باتری پنهان نشود.
+    // کیبورد هم همین‌جا حساب می‌شود (جای adjustResize).
+    private void applySystemBarInsets(FrameLayout root) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return;   // نسخه‌های قدیمی خودشان مدیریت می‌کنند
+        getWindow().setDecorFitsSystemWindows(false);
+        root.setOnApplyWindowInsetsListener((v, insets) -> {
+            Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+            Insets ime  = insets.getInsets(WindowInsets.Type.ime());
+            v.setPadding(bars.left, bars.top, bars.right, Math.max(bars.bottom, ime.bottom));
+            return WindowInsets.CONSUMED;
+        });
     }
 
     // ── درخواست HTTP بومی (env.js آن را جایگزین fetch می‌کند) ──

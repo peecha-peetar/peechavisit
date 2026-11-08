@@ -493,28 +493,33 @@ with tab_cfg:
                  "پایین همین صفحه «ساخت کلید جدید» را بزنید.")
 
     # ── اپ موبایل (بدون ری‌استارت) ──
-    M = cur_cfg["MOBILE"]
-    with st.form("mobile_form"):
-        st.markdown("<div class='sec-t'>📱 اپ موبایل ویزیتورها</div>"
-                    "<div class='sec-s'>بلافاصله اعمال می‌شود؛ روی گوشی با دکمهٔ «همگام‌سازی» یا باز کردن دوبارهٔ اپ.</div>",
-                    unsafe_allow_html=True)
-        m1, m2 = st.columns(2)
-        with m1:
-            m_selfie = st.toggle("📸 سلفی برای ثبت ویزیت اجباری باشد", value=M["REQUIRE_SELFIE"])
-            m_price = st.toggle("💰 قیمت کالا نمایش داده شود", value=M["SHOW_PRICE"])
-            m_stock = st.toggle("📦 موجودی کالا نمایش داده شود", value=M["SHOW_STOCK"])
-        with m2:
-            m_instock = st.toggle("✅ فقط کالاهای دارای موجودی در لیست بیایند", value=M["ONLY_IN_STOCK"])
-            m_oversell = st.toggle("⚠️ سفارش بیشتر از موجودی (یا بدون موجودی) مجاز باشد",
-                                   value=M["ALLOW_OVERSELL"],
-                                   help="خاموش: تعداد سفارش از موجودی بیشتر نمی‌شود")
-        save_mobile = st.form_submit_button("💾 ذخیرهٔ تنظیمات اپ موبایل", type="primary")
-    if save_mobile:
-        config.save_settings({"MOBILE": {"REQUIRE_SELFIE": m_selfie, "SHOW_PRICE": m_price,
-                                         "SHOW_STOCK": m_stock, "ONLY_IN_STOCK": m_instock,
-                                         "ALLOW_OVERSELL": m_oversell}})
-        flash("✅ تنظیمات اپ موبایل ذخیره شد و از همین حالا اعمال می‌شود.")
-        st.rerun()
+    M = cur_cfg.get("MOBILE")
+    if M is None:
+        st.error("⚠️ فایل config.py قدیمی است یا پنل بعد از به‌روزرسانی ری‌استارت نشده. "
+                 "همهٔ پنجره‌های سیاه را ببندید و start.bat را دوباره اجرا کنید. اگر باز هم این پیام را دیدید، "
+                 "config.py را از نسخهٔ جدید جایگزین کنید (نام SQL Server و IP را می‌توانید همین‌جا در تنظیمات وارد کنید).")
+    else:
+        with st.form("mobile_form"):
+            st.markdown("<div class='sec-t'>📱 اپ موبایل ویزیتورها</div>"
+                        "<div class='sec-s'>بلافاصله اعمال می‌شود؛ روی گوشی با دکمهٔ «همگام‌سازی» یا باز کردن دوبارهٔ اپ.</div>",
+                        unsafe_allow_html=True)
+            m1, m2 = st.columns(2)
+            with m1:
+                m_selfie = st.toggle("📸 سلفی برای ثبت ویزیت اجباری باشد", value=M["REQUIRE_SELFIE"])
+                m_price = st.toggle("💰 قیمت کالا نمایش داده شود", value=M["SHOW_PRICE"])
+                m_stock = st.toggle("📦 موجودی کالا نمایش داده شود", value=M["SHOW_STOCK"])
+            with m2:
+                m_instock = st.toggle("✅ فقط کالاهای دارای موجودی در لیست بیایند", value=M["ONLY_IN_STOCK"])
+                m_oversell = st.toggle("⚠️ سفارش بیشتر از موجودی (یا بدون موجودی) مجاز باشد",
+                                       value=M["ALLOW_OVERSELL"],
+                                       help="خاموش: تعداد سفارش از موجودی بیشتر نمی‌شود")
+            save_mobile = st.form_submit_button("💾 ذخیرهٔ تنظیمات اپ موبایل", type="primary")
+        if save_mobile:
+            config.save_settings({"MOBILE": {"REQUIRE_SELFIE": m_selfie, "SHOW_PRICE": m_price,
+                                             "SHOW_STOCK": m_stock, "ONLY_IN_STOCK": m_instock,
+                                             "ALLOW_OVERSELL": m_oversell}})
+            flash("✅ تنظیمات اپ موبایل ذخیره شد و از همین حالا اعمال می‌شود.")
+            st.rerun()
 
     st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
     N, D, S, A = cur_cfg["NETWORK"], cur_cfg["DATABASES"], cur_cfg["SECURITY"], cur_cfg["APP"]
