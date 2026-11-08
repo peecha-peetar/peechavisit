@@ -10,6 +10,7 @@ app = Flask(__name__)
 # ══════════════════════════════════════════
 # تنظیمات امنیتی
 # ══════════════════════════════════════════
+import config
 from config import NETWORK, SECURITY, PATHS
 from db import get_conn, TRACKING_DB, SALES_DB
 from auth import verify_login
@@ -204,6 +205,8 @@ def login():
 @app.route('/api/sync-data', methods=['GET'])
 @require_auth
 def sync_data():
+    # تنظیمات اپ موبایل هر بار تازه از settings.json خوانده می‌شود (بدون ری‌استارت)
+    rules = config.current_settings()["MOBILE"]
     step = 'اتصال به دیتابیس فروش'
     try:
         conn = get_conn(SALES_DB); cur = conn.cursor()
@@ -226,9 +229,10 @@ def sync_data():
                      for r in cur.fetchall()]
 
         step = 'خواندن کالاها'
-        cur.execute("""
+        stock_filter = "AND Exist > 0" if rules["ONLY_IN_STOCK"] else ""
+        cur.execute(f"""
             SELECT CAST(A_Code AS NVARCHAR(50)), CAST(A_Name AS NVARCHAR(200)), Sel_Price, Exist
-            FROM article WHERE [Delete]=0 OR [Delete] IS NULL
+            FROM article WHERE ([Delete]=0 OR [Delete] IS NULL) {stock_filter}
         """)
         articles = [{"code":(r[0] or '').strip(), "name":fa_text(r[1]),
                      "price":float(r[2] or 0), "stock":float(r[3] or 0)}
@@ -238,7 +242,8 @@ def sync_data():
         print(f"✅ sync-data | {len(customers)} مشتری | {len(articles)} کالا")
         return jsonify({"status":"success",
                         "customers":customers,
-                        "articles":articles}), 200
+                        "articles":articles,
+                        "settings":rules}), 200
     except Exception as e:
         print(f"❌ sync-data error ({step}): {e}")
         return jsonify({"status":"error","message":f"{step}: {e}"}), 500

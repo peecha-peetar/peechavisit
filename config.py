@@ -61,6 +61,17 @@ PATHS = {
     "LOGS_DIR":      "logs",
 }
 
+# ── اپ موبایل ──
+# از «پنل مدیریت ← تنظیمات» قابل تغییر است و بدون ری‌استارت روی گوشی‌ها
+# اعمال می‌شود (با بروزرسانی لیست در اپ)
+MOBILE = {
+    "REQUIRE_SELFIE": True,    # سلفی برای ثبت ویزیت اجباری باشد
+    "SHOW_PRICE":     True,    # قیمت کالا در اپ نمایش داده شود
+    "SHOW_STOCK":     True,    # موجودی کالا در اپ نمایش داده شود
+    "ONLY_IN_STOCK":  False,   # فقط کالاهای دارای موجودی در لیست بیایند
+    "ALLOW_OVERSELL": False,   # سفارش بیشتر از موجودی مجاز باشد
+}
+
 # ── GPS ──
 GPS = {
     "MAX_ACCURACY_METERS": 100,
@@ -76,7 +87,7 @@ SETTINGS_FILE = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "set
 
 _SECTIONS = {
     "NETWORK": NETWORK, "DATABASES": DATABASES, "APP": APP,
-    "SECURITY": SECURITY, "PATHS": PATHS, "GPS": GPS,
+    "SECURITY": SECURITY, "PATHS": PATHS, "GPS": GPS, "MOBILE": MOBILE,
 }
 DEFAULTS = _copy.deepcopy(_SECTIONS)
 

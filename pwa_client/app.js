@@ -196,14 +196,148 @@ function autoSync() {
 // ══════════════════════════════════════════
 // داده پایه — با token
 // ══════════════════════════════════════════
+// ══════════════════════════════════════════
+// تنظیمات اپ (از پنل مدیریت، همراه sync-data)
+// ══════════════════════════════════════════
+const DEFAULT_RULES = { REQUIRE_SELFIE: true, SHOW_PRICE: true, SHOW_STOCK: true,
+                        ONLY_IN_STOCK: false, ALLOW_OVERSELL: false };
+let appRules = { ...DEFAULT_RULES };
+
+function applyRules(r) {
+    appRules = { ...DEFAULT_RULES, ...(r || {}) };
+    document.body.classList.toggle('hide-price', !appRules.SHOW_PRICE);
+    document.getElementById('selfie-label').innerHTML =
+        `سلفی حضور در محل <span class="tag">(${appRules.REQUIRE_SELFIE ? 'اجباری' : 'اختیاری'})</span>`;
+    renderBasket();
+    updateArticleInfo(articlePicker.value);
+    articlePicker.refresh();
+}
+
+const fmt = n => Number(n || 0).toLocaleString('fa-IR');
+const escHtml = v => String(v ?? '').replace(/[&<>"']/g,
+    c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+// جستجو بدون حساسیت به ی/ي، ک/ك و ارقام فارسی
+function normFa(v) {
+    return String(v ?? '').toLowerCase()
+        .replace(/[يى]/g, 'ی').replace(/ك/g, 'ک')
+        .replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d))
+        .replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d))
+        .replace(/\s+/g, ' ').trim();
+}
+
+// ══════════════════════════════════════════
+// انتخابگر جستجوپذیر: یک فیلد برای جستجو و انتخاب
+// ══════════════════════════════════════════
+const PICKER_LIMIT = 60;
+
+function makePicker({ root, hidden, items, label, sub, onSelect, emptyText }) {
+    const wrap  = document.getElementById(root);
+    const input = wrap.querySelector('input');
+    const list  = wrap.querySelector('.picker-list');
+    const clear = wrap.querySelector('.picker-clear');
+    const hid   = document.getElementById(hidden);
+    let selected = null, shown = [];
+
+    function render() {
+        const all = items();
+        const q = selected ? '' : normFa(input.value);
+        const matches = q ? all.filter(it => normFa(label(it)).includes(q) || normFa(it.code).includes(q)) : all;
+        shown = matches.slice(0, PICKER_LIMIT);
+        list.innerHTML = shown.length
+            ? shown.map((it, i) => `<div class="picker-item${selected && it.code === selected.code ? ' active' : ''}" data-i="${i}" role="option">
+                   <div class="t">${escHtml(label(it))}</div><div class="s">${sub(it)}</div></div>`).join('')
+              + (matches.length > PICKER_LIMIT
+                  ? `<div class="picker-empty">${fmt(matches.length - PICKER_LIMIT)} مورد دیگر — برای دیدن، بیشتر تایپ کنید</div>` : '')
+            : `<div class="picker-empty">${all.length ? 'موردی پیدا نشد' : emptyText}</div>`;
+    }
+    const open  = () => { render(); wrap.classList.add('open'); };
+    const close = () => wrap.classList.remove('open');
+
+    function select(it) {
+        selected = it || null;
+        hid.value = selected ? selected.code : '';
+        input.value = selected ? label(selected) : '';
+        input.classList.toggle('has-value', !!selected);
+        close();
+        if (onSelect) onSelect(selected);
+    }
+
+    input.addEventListener('focus', open);
+    input.addEventListener('input', () => {
+        if (selected) { selected = null; hid.value = ''; input.classList.remove('has-value'); if (onSelect) onSelect(null); }
+        open();
+    });
+    input.addEventListener('blur', () => setTimeout(close, 150));
+    input.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && shown.length) { e.preventDefault(); select(shown[0]); input.blur(); }
+    });
+    // mousedown: فوکوس فیلد حفظ شود تا لمس آیتم ثبت شود (اسکرول لیست را مختل نمی‌کند)
+    list.addEventListener('mousedown', e => e.preventDefault());
+    list.addEventListener('click', e => {
+        const el = e.target.closest('.picker-item');
+        if (el) { select(shown[+el.dataset.i]); input.blur(); }
+    });
+    clear.addEventListener('mousedown', e => e.preventDefault());
+    clear.addEventListener('click', () => { select(null); input.focus(); });
+
+    return {
+        get value() { return selected; },
+        select,
+        setPlaceholder(t) { input.placeholder = t; },
+        refresh() {
+            if (selected) {
+                const fresh = items().find(x => x.code === selected.code);
+                if (fresh !== selected) select(fresh || null);
+            }
+            if (wrap.classList.contains('open')) render();
+        },
+    };
+}
+
+const customerPicker = makePicker({
+    root: 'customer-picker', hidden: 'main-customer-select',
+    items: () => allCustomersRaw,
+    label: c => c.name || c.code,
+    sub: c => `کد ${escHtml(c.code)}`,
+    emptyText: 'لیست مشتریان هنوز دریافت نشده — «همگام‌سازی» را بزنید',
+});
+
+const articlePicker = makePicker({
+    root: 'article-picker', hidden: 'order-article-select',
+    items: () => allArticlesRaw,
+    label: a => a.name || a.code,
+    sub: a => [
+        `کد ${escHtml(a.code)}`,
+        appRules.SHOW_PRICE ? `${fmt(a.price)} ریال` : '',
+        appRules.SHOW_STOCK ? (a.stock > 0 ? `موجودی ${fmt(a.stock)}` : '<span class="out">ناموجود</span>') : '',
+    ].filter(Boolean).join(' · '),
+    onSelect: a => updateArticleInfo(a),
+    emptyText: 'لیست کالاها هنوز دریافت نشده — «همگام‌سازی» را بزنید',
+});
+
+applyRules();   // پیش‌فرض‌ها تا رسیدن تنظیمات از کش یا سرور
+
+function updateArticleInfo(a) {
+    document.getElementById('order-price').value = a ? fmt(a.price) : '';
+    const hint = document.getElementById('stock-hint');
+    hint.className = 'hint';
+    hint.textContent = '';
+    if (!a || !appRules.SHOW_STOCK) return;
+    if (a.stock > 0) hint.textContent = `موجودی: ${fmt(a.stock)}`;
+    else { hint.textContent = appRules.ALLOW_OVERSELL ? 'ناموجود (سفارش بدون موجودی مجاز است)' : 'این کالا موجودی ندارد'; hint.classList.add('warn'); }
+}
+
+function setListPlaceholders() {
+    customerPicker.setPlaceholder(allCustomersRaw.length ? 'نام یا کد مشتری را جستجو کنید' : 'لیست مشتریان دریافت نشده');
+    articlePicker.setPlaceholder(allArticlesRaw.length ? 'نام یا کد کالا را جستجو کنید' : 'لیست کالاها دریافت نشده');
+}
+
 // خطای دریافت داده پایه را به کاربر نشان بده (به‌جای «در حال بارگذاری...» دائمی)
 function showSyncError(msg) {
     console.warn('[PeechaVisit] sync-data:', msg);
-    ['main-customer-select', 'order-article-select'].forEach(id => {
-        const s = document.getElementById(id);
-        if (s && (!s.options.length || !s.options[0].value || s.options[0].text.includes('بارگذاری')))
-            s.innerHTML = `<option value="">❌ دریافت لیست ناموفق — ${msg}</option>`;
-    });
+    if (!allCustomersRaw.length) customerPicker.setPlaceholder('❌ دریافت لیست ناموفق');
+    if (!allArticlesRaw.length)  articlePicker.setPlaceholder('❌ دریافت لیست ناموفق');
     alert('❌ لیست مشتری و کالا از سرور دریافت نشد:\n' + msg);
 }
 
@@ -217,8 +351,10 @@ function fetchServerData() {
             const tx = db.transaction("cached_data","readwrite");
             tx.objectStore("cached_data").put({ type:"customers", list:d.customers });
             tx.objectStore("cached_data").put({ type:"articles",  list:d.articles  });
-            renderCustomers(allCustomersRaw);
-            renderArticles(allArticlesRaw);
+            tx.objectStore("cached_data").put({ type:"settings",  list:d.settings || {} });
+            applyRules(d.settings);
+            customerPicker.refresh();
+            setListPlaceholders();
         }).catch(err => {
             if (err.message === 'TOKEN_EXPIRED') return;
             // آفلاین: اگر کش داریم همان نمایش داده می‌شود
@@ -230,67 +366,57 @@ function fetchServerData() {
 function loadCache() {
     if (!db) return;
     const tx = db.transaction("cached_data","readonly"), s = tx.objectStore("cached_data");
+    s.get("settings").onsuccess = e => { if (e.target.result) applyRules(e.target.result.list); };
     s.get("customers").onsuccess = e => {
-        if (e.target.result) { allCustomersRaw = e.target.result.list; renderCustomers(allCustomersRaw); }
+        if (e.target.result) { allCustomersRaw = e.target.result.list; setListPlaceholders(); }
     };
     s.get("articles").onsuccess = e => {
-        if (e.target.result) { allArticlesRaw = e.target.result.list; renderArticles(allArticlesRaw); }
+        if (e.target.result) { allArticlesRaw = e.target.result.list; setListPlaceholders(); }
     };
-}
-
-function renderCustomers(list) {
-    const s = document.getElementById("main-customer-select");
-    s.innerHTML = (list||[]).length
-        ? list.map(c=>`<option value="${c.code}">${c.name} (${c.code})</option>`).join('')
-        : '<option>مشتری یافت نشد</option>';
-}
-function renderArticles(list) {
-    const s = document.getElementById("order-article-select");
-    s.innerHTML = (list||[]).length
-        ? list.map(a=>`<option value="${a.code}" data-price="${a.price}" data-stock="${a.stock}">${a.name} | موجودی:${a.stock}</option>`).join('')
-        : '<option>کالا یافت نشد</option>';
-    updatePrice();
-}
-function filterCustomers() {
-    const q = document.getElementById("customer-search").value.toLowerCase().trim();
-    renderCustomers(q ? allCustomersRaw.filter(c=>
-        c.name.toLowerCase().includes(q)||String(c.code).includes(q)) : allCustomersRaw);
-}
-function filterArticles() {
-    const q = document.getElementById("article-search").value.toLowerCase().trim();
-    renderArticles(q ? allArticlesRaw.filter(a=>
-        a.name.toLowerCase().includes(q)||String(a.code).includes(q)) : allArticlesRaw);
-}
-function updatePrice() {
-    const s = document.getElementById("order-article-select"), o = s.options[s.selectedIndex];
-    document.getElementById("order-price").value = o ? (o.getAttribute("data-price")||0) : 0;
 }
 
 // ══════════════════════════════════════════
 // سبد
 // ══════════════════════════════════════════
-function addArticleToBasket() {
-    const s = document.getElementById("order-article-select"), o = s.options[s.selectedIndex];
-    if (!o) return;
-    const qty = parseFloat(document.getElementById("order-qty").value);
-    const max = parseFloat(o.getAttribute("data-stock")||0);
-    if (!qty||qty<1) { alert("تعداد معتبر نیست"); return; }
-    if (qty>max) { alert(`موجودی کافی نیست (موجودی: ${max})`); return; }
-    orderBasket.push({ code:s.value, name:o.text.split('|')[0].trim(),
-                       qty, price:parseFloat(document.getElementById("order-price").value) });
-    renderBasketTable();
-    document.getElementById("order-qty").value = "1";
+function stepQty(d) {
+    const el = document.getElementById("order-qty");
+    el.value = Math.max(1, (parseFloat(el.value) || 0) + d);
 }
-function removeArticleFromBasket(i) { orderBasket.splice(i,1); renderBasketTable(); }
-function renderBasketTable() {
-    document.getElementById("basket-body").innerHTML = orderBasket.length
-        ? orderBasket.map((it,i)=>`<tr>
-            <td style="text-align:right">${it.name}</td>
-            <td>${it.qty}</td>
-            <td>${it.price.toLocaleString()}</td>
-            <td><button class="btn btn-danger" onclick="removeArticleFromBasket(${i})">❌</button></td>
-          </tr>`).join('')
-        : '<tr><td colspan="4" style="color:#94a3b8;padding:12px;text-align:center">سبد خالی</td></tr>';
+
+function addArticleToBasket() {
+    const it = articlePicker.value;
+    if (!it) { alert("ابتدا کالا را انتخاب کنید."); return; }
+    const qty = parseFloat(document.getElementById("order-qty").value);
+    if (!qty || qty <= 0) { alert("تعداد معتبر نیست."); return; }
+    const existing = orderBasket.find(b => b.code === it.code);
+    const total = qty + (existing ? existing.qty : 0);
+    if (!appRules.ALLOW_OVERSELL && total > (it.stock || 0)) {
+        alert(appRules.SHOW_STOCK
+            ? `موجودی کافی نیست (موجودی: ${fmt(it.stock)}${existing ? ` — ${fmt(existing.qty)} عدد در سبد است` : ''})`
+            : 'موجودی این کالا برای این تعداد کافی نیست.');
+        return;
+    }
+    if (existing) existing.qty = total;
+    else orderBasket.push({ code: it.code, name: it.name, qty, price: parseFloat(it.price) || 0 });
+    renderBasket();
+    document.getElementById("order-qty").value = "1";
+    articlePicker.select(null);
+}
+
+function removeArticleFromBasket(i) { orderBasket.splice(i,1); renderBasket(); }
+
+function renderBasket() {
+    document.getElementById("basket-body").innerHTML = orderBasket.map((it, i) => `
+        <div class="basket-row">
+            <div class="info">
+                <div class="n">${escHtml(it.name)}</div>
+                <div class="d">${fmt(it.qty)} عدد${appRules.SHOW_PRICE ? ` × ${fmt(it.price)} = ${fmt(it.qty * it.price)} ریال` : ''}</div>
+            </div>
+            <button type="button" class="rm" onclick="removeArticleFromBasket(${i})" aria-label="حذف">✕</button>
+        </div>`).join('');
+    const sum = orderBasket.reduce((t, it) => t + it.qty * it.price, 0);
+    document.getElementById("basket-total").textContent =
+        orderBasket.length ? `جمع سبد: ${fmt(sum)} ریال` : '';
 }
 
 // ══════════════════════════════════════════
@@ -429,12 +555,12 @@ function updateSyncCount() {
         const txt = document.getElementById("net-status");
         if (n > 0)
             txt.textContent = navigator.onLine
-                ? `آنلاین - ${n} رکورد در صف 🟡`
-                : `آفلاین - ${n} رکورد در صف 🔴`;
+                ? `${n} رکورد در صف ارسال`
+                : `آفلاین — ${n} رکورد در صف ارسال`;
         else
             txt.textContent = navigator.onLine
-                ? "اتصال برقرار است 🟢"
-                : "حالت آفلاین - داده ذخیره می‌شود 🔴";
+                ? "متصل"
+                : "آفلاین — ثبت‌ها در گوشی ذخیره می‌شوند";
     };
 }
 
@@ -482,8 +608,9 @@ function submitIntegratedForm() {
 
     const customerCode = document.getElementById("main-customer-select").value;
     const selfie       = document.getElementById("selfie-base64").value;
-    if (!customerCode||customerCode.includes("بارگذاری")) { alert("⚠️ یک مشتری انتخاب کنید."); return; }
-    if (!selfie) { alert("⚠️ عکس سلفی الزامی است."); return; }
+    if (!customerCode) { alert("⚠️ یک مشتری انتخاب کنید."); return; }
+    if (appRules.REQUIRE_SELFIE && !selfie) { alert("⚠️ عکس سلفی الزامی است."); return; }
+    if (currentMode==="order" && !orderBasket.length) { alert("⚠️ سبد سفارش خالی است."); return; }
     if (currentMode==="pay") {
         const amt = parseFloat(document.getElementById("pay-amount").value||0);
         if (!amt||amt<=0) { alert("⚠️ مبلغ دریافت را وارد کنید."); return; }
@@ -518,7 +645,7 @@ function submitIntegratedForm() {
         });
     }, errMsg => {
         isSubmitting = false; btn.disabled = false;
-        btn.innerHTML = "💾 ثبت نهایی و ارسال به پیچا";
+        btn.innerHTML = "ثبت و ارسال";
         alert("❌ GPS دریافت نشد: " + (errMsg||""));
     });
 }
@@ -579,7 +706,7 @@ function trySend(payload, uid, btn) {
 
 function done(btn, sent, t) {
     isSubmitting = false; btn.disabled = false;
-    btn.innerHTML = "💾 ثبت نهایی و ارسال به پیچا";
+    btn.innerHTML = "ثبت و ارسال";
     resetForm(); updateSyncCount();
     alert(sent
         ? `✅ با موفقیت ثبت شد\n⏱️ ${t}`
@@ -594,13 +721,14 @@ async function syncLocalDataToServer() {
     if (isSyncing||isSubmitting) return;
     if (!navigator.onLine) { alert("❌ اینترنت وصل نیست. لطفاً بعداً امتحان کنید."); return; }
     if (!getSession()) { window.location.replace('login.html'); return; }
+    fetchServerData();   // لیست مشتری، کالا و تنظیمات هم بروز شود
     isSyncing = true;
 
     const records = await new Promise(res => {
         const tx = db.transaction("offline_queue","readonly");
         tx.objectStore("offline_queue").getAll().onsuccess = e => res(e.target.result||[]);
     });
-    if (!records.length) { isSyncing=false; alert("✅ صف آفلاین خالی."); return; }
+    if (!records.length) { isSyncing=false; alert("✅ چیزی در صف ارسال نیست. لیست‌ها بروز شد."); return; }
 
     let ok=0, skip=0, fail=0;
     for (const rec of records) {
@@ -640,8 +768,9 @@ function resetForm() {
     });
     document.getElementById("pay-type").value = "نقدی";
     handlePayTypeChange();
-    orderBasket = []; renderBasketTable();
-    renderCustomers(allCustomersRaw);
+    orderBasket = []; renderBasket();
+    customerPicker.select(null); articlePicker.select(null);
+    document.getElementById("order-qty").value = "1";
     stopCamera(); stopCheckCamera(); stopTransferCamera();
 }
 

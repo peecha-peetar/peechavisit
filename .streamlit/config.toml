@@ -7,3 +7,10 @@ gatherUsageStats = false
 
 [server]
 headless = true
+
+[theme]
+base = "light"
+primaryColor = "#3b5bdb"
+backgroundColor = "#f3f5fb"
+secondaryBackgroundColor = "#eef1f7"
+textColor = "#17202e"

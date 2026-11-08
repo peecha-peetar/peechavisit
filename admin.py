@@ -19,6 +19,7 @@ from config import APP, SECURITY, DEFAULTS, SETTINGS_FILE
 from db import get_conn, TRACKING_DB, SALES_DB
 from auth import hash_password, is_locked
 from panel_auth import require_admin, logout
+from ui_font import font_css
 
 C1, C2 = APP["PRIMARY_COLOR"], APP["ACCENT_COLOR"]
 PW_MIN = int(SECURITY["PASSWORD_MIN_LEN"])
@@ -32,14 +33,6 @@ st.set_page_config(page_title=f"مدیریت | {APP['NAME']}", page_icon="🛠�
 # ══════════════════════════════════════════════
 st.markdown(f"""
 <style>
-html, body, [class*="css"], .stApp, button, input, textarea, select {{
-    font-family: 'Vazirmatn', Tahoma, sans-serif !important;
-}}
-@font-face {{
-    font-family: 'Vazirmatn';
-    src: url('http://{config.NETWORK["SERVER_IP"]}:{config.NETWORK["PWA_PORT"]}/fonts/Vazirmatn-Variable.woff2') format('woff2');
-    font-weight: 100 900;
-}}
 .stApp {{ background:#f3f5fb; direction:rtl; }}
 .block-container {{ padding:3.4rem 28px 40px !important; max-width:1280px; }}
 p, label, .stMarkdown, .stCaption, .stAlert {{ direction:rtl; text-align:right; }}
@@ -48,10 +41,9 @@ input[type=number] {{ direction:ltr; text-align:left; }}
 
 /* هدر */
 .pv-head {{
-    background:linear-gradient(120deg,{C1} 0%,#1b1b6b 60%,{C2} 140%);
+    background:{C1};
     border-radius:18px; padding:20px 24px; color:#fff; margin-bottom:14px;
     display:flex; justify-content:space-between; align-items:center;
-    box-shadow:0 10px 30px rgba(2,0,37,.18);
 }}
 .pv-head .t {{ font-size:20px; font-weight:900; }}
 .pv-head .s {{ font-size:12px; opacity:.75; margin-top:4px; }}
@@ -108,6 +100,7 @@ input[type=number] {{ direction:ltr; text-align:left; }}
 </style>
 """, unsafe_allow_html=True)
 
+st.markdown(font_css(), unsafe_allow_html=True)
 ADMIN = require_admin("پنل مدیریت پیچا", "🛠️")
 
 
@@ -490,14 +483,40 @@ def _valid_host(h: str) -> bool:
 
 with tab_cfg:
     cur_cfg = config.current_settings()
-    loaded = {s: getattr(config, s) for s in DEFAULTS}
-    if cur_cfg != loaded:
+    # تنظیمات اپ موبایل بدون ری‌استارت اعمال می‌شود، پس در مقایسه نیست
+    loaded = {s: getattr(config, s) for s in DEFAULTS if s != "MOBILE"}
+    if {s: v for s, v in cur_cfg.items() if s != "MOBILE"} != loaded:
         st.warning("⚠️ تنظیمات ذخیره‌شده با تنظیمات در حال اجرا فرق دارد. "
                    "برای اعمال، سرویس‌ها (app.py، داشبورد و این پنل) را ری‌استارت کنید.")
     if SECURITY["SESSION_SECRET"] == INSECURE_SECRET:
         st.error("🔑 کلید امنیتی توکن‌ها هنوز مقدار پیش‌فرض است و هر کسی کد را دارد می‌تواند توکن جعل کند. "
                  "پایین همین صفحه «ساخت کلید جدید» را بزنید.")
 
+    # ── اپ موبایل (بدون ری‌استارت) ──
+    M = cur_cfg["MOBILE"]
+    with st.form("mobile_form"):
+        st.markdown("<div class='sec-t'>📱 اپ موبایل ویزیتورها</div>"
+                    "<div class='sec-s'>بلافاصله اعمال می‌شود؛ روی گوشی با دکمهٔ «همگام‌سازی» یا باز کردن دوبارهٔ اپ.</div>",
+                    unsafe_allow_html=True)
+        m1, m2 = st.columns(2)
+        with m1:
+            m_selfie = st.toggle("📸 سلفی برای ثبت ویزیت اجباری باشد", value=M["REQUIRE_SELFIE"])
+            m_price = st.toggle("💰 قیمت کالا نمایش داده شود", value=M["SHOW_PRICE"])
+            m_stock = st.toggle("📦 موجودی کالا نمایش داده شود", value=M["SHOW_STOCK"])
+        with m2:
+            m_instock = st.toggle("✅ فقط کالاهای دارای موجودی در لیست بیایند", value=M["ONLY_IN_STOCK"])
+            m_oversell = st.toggle("⚠️ سفارش بیشتر از موجودی (یا بدون موجودی) مجاز باشد",
+                                   value=M["ALLOW_OVERSELL"],
+                                   help="خاموش: تعداد سفارش از موجودی بیشتر نمی‌شود")
+        save_mobile = st.form_submit_button("💾 ذخیرهٔ تنظیمات اپ موبایل", type="primary")
+    if save_mobile:
+        config.save_settings({"MOBILE": {"REQUIRE_SELFIE": m_selfie, "SHOW_PRICE": m_price,
+                                         "SHOW_STOCK": m_stock, "ONLY_IN_STOCK": m_instock,
+                                         "ALLOW_OVERSELL": m_oversell}})
+        flash("✅ تنظیمات اپ موبایل ذخیره شد و از همین حالا اعمال می‌شود.")
+        st.rerun()
+
+    st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
     N, D, S, A = cur_cfg["NETWORK"], cur_cfg["DATABASES"], cur_cfg["SECURITY"], cur_cfg["APP"]
     with st.form("settings_form"):
         col_a, col_b = st.columns(2)

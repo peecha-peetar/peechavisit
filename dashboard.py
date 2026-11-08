@@ -27,9 +27,12 @@ st.set_page_config(
 from config import NETWORK, APP
 from db import get_conn, TRACKING_DB
 from panel_auth import require_admin, logout
+from ui_font import font_css
 SERVER_IP   = NETWORK["SERVER_IP"]
 API_PORT    = NETWORK["FLASK_PORT"]
 C1          = APP["PRIMARY_COLOR"]
+
+st.markdown(font_css(), unsafe_allow_html=True)
 
 # ── ورود مدیر (قبلاً داشبورد بدون رمز برای همه باز بود) ──
 ADMIN = require_admin("داشبورد پیچا ویزیت", "📍")
@@ -39,8 +42,6 @@ ADMIN = require_admin("داشبورد پیچا ویزیت", "📍")
 # ══════════════════════════════════════════════════════
 st.markdown(f"""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700;800;900&display=swap');
-
 html,body,*,[class*="css"],[data-testid],
 p,span,div,label,h1,h2,h3,h4,h5,h6,
 button,input,select,textarea,th,td,li,a {{
@@ -57,10 +58,16 @@ button,input,select,textarea,th,td,li,a {{
 
 /* ── سایدبار ── */
 [data-testid="stSidebar"] {{
-    background:linear-gradient(180deg,{C1} 0%,#0d0d4a 70%,#150035 100%) !important;
+    background:{C1} !important;
     min-width:290px !important; width:290px !important;
 }}
 [data-testid="stSidebar"] > div:first-child {{ padding:0 !important; min-width:290px !important; }}
+[data-testid="stSidebarResizeHandle"] {{ display:none !important; }}
+/* فیلدهای انتخاب سایدبار: متن تیره روی زمینهٔ روشن (قبلاً متن سفید روی سفید دیده نمی‌شد) */
+[data-testid="stSidebar"] [data-testid="stSelectbox"] input,
+[data-testid="stSidebar"] [data-testid="stSelectbox"] svg {{
+    color:#17202e !important; -webkit-text-fill-color:#17202e !important;
+}}
 [data-testid="stSidebar"] * {{
     color:#e8eaf6 !important;
     font-family:'Vazirmatn',Tahoma,sans-serif !important;
@@ -74,7 +81,7 @@ button,input,select,textarea,th,td,li,a {{
     font-size:13px !important;
 }}
 [data-testid="stSidebar"] .stButton>button {{
-    background:linear-gradient(135deg,#3949ab,#5c6bc0) !important;
+    background:#3b5bdb !important;
     color:white !important; border-radius:10px !important;
     border:none !important; font-weight:700 !important;
     width:100% !important; padding:11px !important; font-size:14px !important;
@@ -174,7 +181,7 @@ span[aria-keyshortcuts],
     padding:8px 16px !important;
 }}
 .stTabs [aria-selected="true"] {{
-    background:linear-gradient(135deg,{C1},#3949ab) !important; color:white !important;
+    background:{C1} !important; color:white !important;
 }}
 
 /* ── کارت رکورد ── */
@@ -280,7 +287,7 @@ span[aria-keyshortcuts],
 
 /* دکمه دانلود */
 .stDownloadButton button {{
-    background:linear-gradient(135deg,#1b5e20,#2e7d32) !important;
+    background:#12805c !important;
     color:white !important; border-radius:10px !important;
     border:none !important; font-weight:700 !important;
     padding:10px 20px !important; font-size:13px !important;
@@ -387,14 +394,14 @@ with st.sidebar:
     years = list(range(today_j.year-3, today_j.year+2))
 
     st.markdown("<div style='color:#c5cae9;font-size:11px;padding:0 20px 4px'>🔹 از تاریخ</div>", unsafe_allow_html=True)
-    a,b,c = st.columns([3,3,2])
+    a,b,c = st.columns([2.6,3,2.4])
     with a: sy = st.selectbox("سال از",years,index=years.index(today_j.year),key="sy",label_visibility="collapsed")
     with b: sm = st.selectbox("ماه از",range(1,13),index=today_j.month-1,key="sm",
                                format_func=lambda x:months[x-1],label_visibility="collapsed")
     with c: sd = st.selectbox("روز از",range(1,32),index=0,key="sd",label_visibility="collapsed")
 
     st.markdown("<div style='color:#c5cae9;font-size:11px;padding:4px 20px'>🔸 تا تاریخ</div>", unsafe_allow_html=True)
-    d,e,f_ = st.columns([3,3,2])
+    d,e,f_ = st.columns([2.6,3,2.4])
     with d: ey = st.selectbox("سال تا",years,index=years.index(today_j.year),key="ey",label_visibility="collapsed")
     with e: em = st.selectbox("ماه تا",range(1,13),index=today_j.month-1,key="em",
                                format_func=lambda x:months[x-1],label_visibility="collapsed")
@@ -589,7 +596,7 @@ if not visits_df.empty:
             "box-shadow:0 8px 28px rgba(0,0,0,.22)!important;overflow:hidden!important;padding:0!important}"
             ".leaflet-popup-content{margin:0!important;width:220px!important}"
             f"@keyframes pvPop{{from{{opacity:0;transform:scale(.85) translateY(8px)}}to{{opacity:1;transform:scale(1) translateY(0)}}}}</style>"
-            f"<div style=\'background:linear-gradient(135deg,{C1},#3949ab);color:white;"
+            f"<div style=\'background:{C1};color:white;"
             f"padding:10px 12px 8px\'>"
             f"<div style=\'font-size:12px;font-weight:bold;margin-bottom:3px\'>📍 {row['C_Name']}</div>"
             f"<div style=\'font-size:10px;opacity:.75\'>گام {step} از {n}  ·  {to_j(row['visit_date'])}</div>"
@@ -941,7 +948,7 @@ if has_detail and detail_col is not None:
             # هد
             st.markdown(
                 "<div class='dp-wrap'>"
-                "<div class='dp-head' style='background:linear-gradient(135deg,#020025,#3949ab)'>"
+                "<div class='dp-head' style='background:#3949ab'>"
                 f"<div class='dp-title'>📍 {row['C_Name']}</div>"
                 f"<div class='dp-sub'>{jdate} · {vtime}</div>"
                 "</div><div class='dp-body'>"
@@ -973,7 +980,7 @@ if has_detail and detail_col is not None:
 
             st.markdown(
                 "<div class='dp-wrap'>"
-                "<div class='dp-head' style='background:linear-gradient(135deg,#020025,#7b1fa2)'>"
+                "<div class='dp-head' style='background:#7b1fa2'>"
                 f"<div class='dp-title'>📦 {order['C_Name']}</div>"
                 f"<div class='dp-sub'>{jdate} · {fa_num(order['total_amount'])}</div>"
                 "</div><div class='dp-body'>"
@@ -1031,7 +1038,7 @@ if has_detail and detail_col is not None:
 
             st.markdown(
                 "<div class='dp-wrap'>"
-                f"<div class='dp-head' style='background:linear-gradient(135deg,#020025,{clr_p})'>"
+                f"<div class='dp-head' style='background:{clr_p}'>"
                 f"<div class='dp-title'>{icon} {pay['C_Name']}</div>"
                 f"<div class='dp-sub'>{jdate} · {ptype}</div>"
                 "</div><div class='dp-body'>"

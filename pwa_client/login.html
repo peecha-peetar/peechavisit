@@ -2,7 +2,7 @@
 <html lang="fa" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="پیچا ویزیت">
     <meta name="theme-color" content="#020025">
@@ -10,94 +10,50 @@
     <link rel="manifest" href="manifest.json">
     <title>ورود | پیچا ویزیت</title>
     <link href="fonts/vazirmatn.css" rel="stylesheet">
+    <link href="ui.css" rel="stylesheet">
     <style>
-        :root { --primary:#020025; --accent:#4f6ef7; --accent2:#7c3aed; }
-        * { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent }
-        body {
-            font-family:'Vazirmatn',Tahoma,sans-serif;
-            background:linear-gradient(135deg,var(--primary) 0%,#0d0d4a 50%,#1a0050 100%);
-            min-height:100vh; display:flex; align-items:center; justify-content:center;
-            direction:rtl; padding:20px;
+        body { padding: 0; background: var(--card); }
+        @media (min-width: 560px) {
+            body { background: var(--bg); display: flex; align-items: center; justify-content: center; padding: 24px; }
+            .login-wrap { border: 1px solid var(--border); border-radius: 16px; }
         }
-        .login-wrap {
-            background:white; border-radius:24px; padding:40px 32px;
-            width:100%; max-width:400px;
-            box-shadow:0 24px 64px rgba(2,0,37,.5);
-            animation:fadeUp .4s ease;
-        }
-        @keyframes fadeUp { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
-        .logo-wrap { text-align:center; margin-bottom:28px }
-        .logo-wrap img { width:72px; height:72px; border-radius:18px; margin-bottom:12px; border:3px solid #e2e8f0 }
-        .logo-wrap h1 { font-size:22px; font-weight:900; color:var(--primary) }
-        .logo-wrap p  { font-size:12px; color:#94a3b8; margin-top:3px; direction:ltr }
-        .form-group { margin-bottom:16px }
-        label { display:block; font-size:12px; font-weight:700; color:#475569; margin-bottom:5px }
-        .input-wrap { position:relative }
-        .input-wrap input {
-            width:100%; padding:13px 44px 13px 14px; border-radius:11px;
-            border:1.5px solid #e2e8f0; font-family:'Vazirmatn',Tahoma,sans-serif;
-            font-size:14px; color:#1e293b; background:#f8fafc; direction:rtl;
-            outline:none; transition:border .2s, box-shadow .2s;
-        }
-        .input-wrap input:focus {
-            border-color:var(--accent); background:white;
-            box-shadow:0 0 0 3px rgba(79,110,247,.12);
-        }
-        .input-icon {
-            position:absolute; right:14px; top:50%; transform:translateY(-50%);
-            font-size:16px; pointer-events:none;
-        }
-        .btn-login {
-            width:100%; padding:15px; border:none; border-radius:13px;
-            background:linear-gradient(135deg,var(--primary),var(--accent2));
-            color:white; font-family:'Vazirmatn',Tahoma,sans-serif;
-            font-size:15px; font-weight:800; cursor:pointer;
-            box-shadow:0 6px 20px rgba(2,0,37,.35);
-            transition:all .2s; margin-top:8px;
-        }
-        .btn-login:active { transform:scale(.98) }
-        .btn-login:disabled { opacity:.6 }
-        .error-msg {
-            background:#fee2e2; border:1px solid #fca5a5; border-radius:10px;
-            padding:10px 14px; font-size:13px; color:#991b1b;
-            margin-bottom:14px; display:none; direction:rtl;
-        }
-        .error-msg.show { display:block; animation:fadeUp .2s ease }
-        .footer-txt {
-            text-align:center; font-size:11px; color:#94a3b8;
-            margin-top:24px; direction:ltr;
-        }
-        .footer-txt a { color:var(--accent); text-decoration:none; font-weight:700 }
-        .loading { display:none; text-align:center; padding:8px; color:#64748b; font-size:13px }
-        .loading.show { display:block }
-        .server-box {
-            margin-top:18px; border:1.5px dashed #cbd5e1; border-radius:13px;
-            padding:12px 14px; background:#f8fafc;
-        }
-        .server-box summary {
-            cursor:pointer; font-size:12px; font-weight:800; color:#475569;
-            list-style:none; display:flex; justify-content:space-between; align-items:center;
-        }
-        .server-box summary::-webkit-details-marker { display:none }
-        .server-box .srv-cur { font-size:11px; color:#94a3b8; direction:ltr; font-weight:600 }
-        .server-box .srv-body { margin-top:12px }
-        .server-box input {
-            width:100%; padding:11px 12px; border-radius:10px; border:1.5px solid #e2e8f0;
-            font-family:'Vazirmatn',Tahoma,sans-serif; font-size:14px; direction:ltr;
-            text-align:left; outline:none; background:white;
-        }
-        .server-box input:focus { border-color:var(--accent) }
-        .server-box .hint { font-size:11px; color:#94a3b8; margin-top:6px; line-height:1.8 }
-        .srv-btns { display:flex; gap:8px; margin-top:10px }
-        .srv-btns button {
-            flex:1; padding:10px; border-radius:10px; border:1.5px solid var(--accent);
-            background:white; color:var(--accent); font-family:'Vazirmatn',Tahoma,sans-serif;
-            font-size:13px; font-weight:800; cursor:pointer;
-        }
-        .srv-btns button.primary { background:var(--accent); color:white }
-        .srv-status { font-size:12px; margin-top:8px; font-weight:700; display:none }
-        .srv-status.ok  { display:block; color:#15803d }
-        .srv-status.err { display:block; color:#b91c1c }
+        .login-wrap { width: 100%; max-width: 440px; margin: 0 auto; background: var(--card); padding: 32px 20px 20px; }
+        .logo-wrap { text-align: center; margin-bottom: 24px; }
+        .logo-wrap img { width: 64px; height: 64px; border-radius: 16px; margin-bottom: 10px; border: 1px solid var(--border); }
+        .logo-wrap h1 { font-size: 22px; font-weight: 800; color: var(--brand); }
+        .logo-wrap p { font-size: 13px; color: var(--muted); margin-top: 2px; }
+        .form-group { margin-bottom: 4px; }
+        .form-group label { display: block; font-size: 13px; font-weight: 600; color: var(--muted); margin: 12px 0 6px; }
+        .input-wrap { position: relative; }
+        .input-icon { display: none; }
+        .btn-login { width: 100%; min-height: 52px; margin-top: 20px; border: 0; border-radius: 10px;
+                     background: var(--primary); color: #fff; font-size: 16px; font-weight: 700; cursor: pointer; }
+        .btn-login:active { background: var(--primary-press); }
+        .btn-login:disabled { opacity: .6; }
+        .error-msg { display: none; margin-bottom: 12px; padding: 10px 12px; border-radius: 10px;
+                     background: var(--danger-soft); color: var(--danger); font-size: 14px; }
+        .error-msg.show { display: block; }
+        .loading { display: none; text-align: center; padding: 8px; color: var(--muted); font-size: 14px; }
+        .loading.show { display: block; }
+        .footer-txt { text-align: center; font-size: 12px; color: var(--muted); margin-top: 22px; }
+        .footer-txt a { color: var(--primary); text-decoration: none; }
+
+        .server-box { margin-top: 18px; border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
+        .server-box summary { cursor: pointer; font-size: 14px; font-weight: 700; list-style: none;
+                              display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+        .server-box summary::-webkit-details-marker { display: none; }
+        .server-box .srv-cur { font-size: 12px; color: var(--muted); direction: ltr; font-weight: 500;
+                               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .server-box .srv-body { margin-top: 12px; }
+        .server-box input { direction: ltr; text-align: left; }
+        .server-box .hint { font-size: 12px; color: var(--muted); margin-top: 6px; line-height: 1.8; }
+        .srv-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+        .srv-btns button { min-height: 44px; border-radius: 10px; font-size: 14px; font-weight: 700; cursor: pointer;
+                           border: 1px solid var(--border); background: #fff; color: var(--text); }
+        .srv-btns button.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+        .srv-status { display: none; font-size: 13px; margin-top: 10px; font-weight: 600; }
+        .srv-status.ok { display: block; color: var(--success); }
+        .srv-status.err { display: block; color: var(--danger); }
     </style>
 </head>
 <body>
@@ -133,12 +89,12 @@
     </div>
 
     <button class="btn-login" id="login-btn" onclick="doLogin()">
-        🔑 ورود به سامانه
+        ورود
     </button>
 
     <details class="server-box" id="server-box">
         <summary>
-            <span>⚙️ آدرس سرور</span>
+            <span>آدرس سرور</span>
             <span class="srv-cur" id="srv-cur"></span>
         </summary>
         <div class="srv-body">
@@ -146,8 +102,8 @@
                    placeholder="192.168.1.50">
             <div class="hint">آی‌پی کامپیوتر سرور در شبکه (از دستور ipconfig). پورت پیش‌فرض ۵۰۰۰ است.</div>
             <div class="srv-btns">
-                <button type="button" onclick="testServer()">🔌 تست اتصال</button>
-                <button type="button" class="primary" onclick="saveServer()">💾 ذخیره</button>
+                <button type="button" onclick="testServer()">تست اتصال</button>
+                <button type="button" class="primary" onclick="saveServer()">ذخیره</button>
             </div>
             <div class="srv-status" id="srv-status"></div>
         </div>
@@ -251,7 +207,7 @@ async function doLogin() {
 
     const API = getApiBase();
     if (!API) {
-        showError('ابتدا آدرس سرور را در بخش «⚙️ آدرس سرور» تنظیم کنید.');
+        showError('ابتدا آدرس سرور را در بخش «آدرس سرور» تنظیم کنید.');
         document.getElementById('server-box').open = true;
         return;
     }
