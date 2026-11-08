@@ -6,9 +6,11 @@
 # ════════════════════════════════════════════════
 import base64
 import io
+import json
 import os
 import re
 import time
+import zlib
 from datetime import date, timedelta
 
 import folium
@@ -29,6 +31,9 @@ from ui_font import font_css
 from ui_theme import theme_css, app_bar
 import audit
 import report
+from config import APP
+
+APP_NAME = APP.get("NAME") or "پیچا ویزیت"
 
 import paths
 BASE_DIR   = paths.DATA_DIR
@@ -47,7 +52,8 @@ STOP_COLORS = {
     "both":  ("#e8590c", "سفارش + دریافت"),
 }
 ROUTE_COLORS = ["#4c6ef5", "#f76707", "#37b24d", "#d6336c", "#1098ad", "#7048e8", "#f59f00", "#868e96"]
-PAGES = ["🗺️ نقشه و لیست", "📊 گزارش‌ساز", "💬 پیام‌ها", "📜 لاگ ورود"]
+PAGES = ["🗺️ نقشه و لیست", "📊 گزارش‌ساز", "📦 گزارش کالا", "💬 پیام‌ها", "📜 لاگ ورود"]
+P_MAP, P_REPORT, P_PRODUCTS, P_MSGS, P_LOGS = PAGES
 
 st.markdown(font_css() + "\n" + theme_css(), unsafe_allow_html=True)
 st.markdown("""
@@ -94,7 +100,11 @@ body:has([data-testid="stDialog"]) [data-testid="stPopoverBody"] { display:none 
 .itm { width:100%; border-collapse:collapse; font-size:13px; }
 .itm th { text-align:right; color:#6b7686; font-weight:600; border-bottom:1px solid #e3e7ef; padding:5px 4px; }
 .itm td { border-bottom:1px solid #f1f3f5; padding:6px 4px; }
-.itm tfoot td { font-weight:800; border-bottom:0; }
+.itm tfoot td { font-weight:800; border-bottom:0; background:#f6f7fb; }
+.itm td.c { width:26px; color:#6b7686; } .itm td.nm { white-space:nowrap; }
+.itm-scroll { max-height:380px; overflow:auto; border:1px solid #eef0f4; border-radius:10px; }
+.itm-scroll thead th { position:sticky; top:0; background:#f6f7fb; z-index:1; }
+.itm-scroll tfoot td { position:sticky; bottom:0; }
 .gal { display:flex; flex-wrap:wrap; gap:10px; margin:0 0 12px; }
 .gal figure { margin:0; width:132px; }
 .gal .th img { width:132px; height:96px; object-fit:cover; border-radius:10px; border:1px solid #dfe3ea; cursor:zoom-in;
@@ -134,8 +144,9 @@ body:has([data-testid="stDialog"]) [data-testid="stPopoverBody"] { display:none 
         display:flex; flex-direction:column; gap:6px; }
 .bub { max-width:75%; padding:8px 12px; border-radius:14px; font-size:14px; line-height:1.8; white-space:pre-wrap; }
 .bub.me { align-self:flex-start; background:#3b5bdb; color:#fff; border-bottom-right-radius:4px; }
-.bub.them { align-self:flex-end; background:#f1f3f5; border-bottom-left-radius:4px; }
+.bub.them { align-self:flex-end; background:#e6f4ea; color:#14361f; border:1px solid #c8e6d0; border-bottom-left-radius:4px; }
 .bub small { display:block; font-size:11px; opacity:.7; }
+.bub .who { display:block; font-size:11px; font-weight:800; opacity:.85; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -448,7 +459,7 @@ def _current_range():
 
 def open_note(table, rec_id, rec_date):
     ss = st.session_state
-    ss["page"] = PAGES[0]
+    ss["page"] = P_MAP
     ss["f_vis"], ss["f_cust"], ss["f_prod"] = "همهٔ ویزیتورها", [], []
     d = pd.Timestamp(rec_date).date() if rec_date else today_g
     g0, g1 = _current_range()
@@ -471,7 +482,7 @@ def open_note(table, rec_id, rec_date):
 bar = st.empty()
 pager = st.container(key="pager")
 pg_col, menu_col = pager.columns([6, 1])
-pages = PAGES if IS_ADMIN else PAGES[:3]
+pages = PAGES if IS_ADMIN else [p_ for p_ in PAGES if p_ != P_LOGS]
 if st.session_state.get("page") not in pages:      # مقدار اولیه فقط از راه session_state
     st.session_state.page = pages[0]
 page = pg_col.segmented_control("صفحه", pages, key="page", required=True,
@@ -491,9 +502,12 @@ with menu_col.popover("☰ منو", width="stretch"):
 # پنجرهٔ جزئیات
 # ══════════════════════════════════════════════
 def _closed():
-    st.session_state["ui_ver"] = st.session_state.get("ui_ver", 0) + 1
-    st.session_state.pop("want_print", None)
-    st.session_state["dlg_open"] = False
+    ss = st.session_state
+    ss["ui_ver"] = ss.get("ui_ver", 0) + 1          # فقط جدول‌ها (پاک شدن انتخاب)
+    if ss.pop("map_click_used", False):
+        ss["map_key"] = ss.get("map_key", 0) + 1    # تا همان نقطه دوباره قابل کلیک باشد
+    ss.pop("want_print", None)
+    ss["dlg_open"] = False
 
 
 def kv(rows) -> str:
@@ -522,19 +536,35 @@ def stop_images(s):
 
 
 def order_html(o, items_by_order) -> str:
+    """جدول اقلام سفارش؛ سفارش‌های پرقلم داخل کادر قابل اسکرول با سرستون ثابت"""
     its = items_by_order.get(int(o["id"]), [])
     note = f"<div class='note' style='margin-top:8px'><b>توضیح سفارش:</b> {esc(o['descr'])}</div>" if txt(o.get("descr")) else ""
     if not its:
         return "<div class='muted'>اقلامی ثبت نشده است.</div>" + note
-    head = "<th>کالا</th><th>تعداد</th>" + ("<th>قیمت واحد</th><th>جمع</th>" if SHOW_MONEY else "")
+    head = "<th>#</th><th>کالا</th><th>تعداد</th>" + ("<th>فی</th><th>جمع</th>" if SHOW_MONEY else "")
     rows = ""
-    for i in its:
-        qty = fa(f"{i['qty']:g}")
-        rows += (f"<tr><td>{esc(i['name'])}<div class='muted'>کد {fa(i['code'])}</div></td><td>{qty}</td>"
-                 + (f"<td>{money(i['price'])}</td><td>{money(i['qty'] * i['price'])}</td>" if SHOW_MONEY else "")
+    for k, i in enumerate(its, 1):
+        rows += (f"<tr><td class='c'>{fa(k)}</td><td>{esc(i['name'])}<div class='muted'>کد {fa(i['code'])}</div></td>"
+                 f"<td class='nm'>{fa(format(i['qty'], 'g'))}</td>"
+                 + (f"<td class='nm'>{money(i['price'])}</td><td class='nm'>{money(i['qty'] * i['price'])}</td>" if SHOW_MONEY else "")
                  + "</tr>")
-    foot = f"<tfoot><tr><td colspan='3'>جمع سفارش</td><td>{money(o['total'])}</td></tr></tfoot>" if SHOW_MONEY else ""
-    return f"<table class='itm'><thead><tr>{head}</tr></thead><tbody>{rows}</tbody>{foot}</table>" + note
+    qty = sum(float(i["qty"] or 0) for i in its)
+    foot = (f"<tfoot><tr><td></td><td>جمع {fa(len(its))} قلم</td><td class='nm'>{fa(f'{qty:g}')}</td>"
+            + (f"<td></td><td class='nm'>{money(o['total'])}</td>" if SHOW_MONEY else "") + "</tr></tfoot>")
+    return (f"<div class='itm-scroll'><table class='itm'><thead><tr>{head}</tr></thead><tbody>{rows}</tbody>{foot}</table></div>"
+            + note)
+
+
+def order_doc(o, s, items_by_order) -> dict:
+    """دادهٔ برگهٔ چاپی یک سفارش"""
+    return {"id": int(o["id"]), "date": jdate(o["d"]), "weekday": jweekday(o["d"]), "time": hhmm(o["t"]),
+            "visitor": s["visitor"], "customer": s["customer"], "customer_code": s["customer_code"],
+            "lines": items_by_order.get(int(o["id"]), []), "total": o["total"], "description": txt(o.get("descr"))}
+
+
+def print_orders(docs, key):
+    """پیش‌نمایش برگهٔ چاپی (دکمهٔ چاپ داخل همان برگه است)"""
+    components.html(report.orders_html(docs, SHOW_MONEY, font_css(), APP_NAME), height=660, scrolling=True)
 
 
 def pay_html(p) -> str:
@@ -599,6 +629,8 @@ def detail_dialog(stop_by_n, items_by_order):
         if focus_order:
             st.markdown(f"<div class='box'><div class='sec'><i style='background:{KIND_COLOR['order']}'></i>اقلام سفارش</div>"
                         f"{order_html(focus_order, items_by_order)}</div>", unsafe_allow_html=True)
+            if st.toggle("🖨️ برگهٔ چاپی سفارش", key=f"prt_{n}_{ref}"):
+                print_orders([order_doc(focus_order, s, items_by_order)], f"po_{n}_{ref}")
         elif focus_pay:
             st.markdown(f"<div class='box'><div class='sec'><i style='background:{KIND_COLOR['pay']}'></i>جزئیات دریافت</div>"
                         f"{pay_html(focus_pay)}</div>", unsafe_allow_html=True)
@@ -608,16 +640,16 @@ def detail_dialog(stop_by_n, items_by_order):
         if focus == "visit" or others_o or others_p:
             if focus != "visit":
                 st.markdown("<div class='sec' style='margin-top:4px'>🔗 در همین ویزیت</div>", unsafe_allow_html=True)
-            c_o, c_p = st.columns(2)
-            with c_o:
-                body = "".join(f"<div class='muted'>سفارش شمارهٔ {fa(o['id'])}</div>{order_html(o, items_by_order)}"
-                               for o in others_o) or "<div class='muted'>سفارشی ثبت نشده است.</div>"
-                st.markdown(f"<div class='box'><div class='sec'><i style='background:{KIND_COLOR['order']}'></i>سفارش</div>{body}</div>",
-                            unsafe_allow_html=True)
-            with c_p:
-                body = "".join(pay_html(p) for p in others_p) or "<div class='muted'>دریافتی ثبت نشده است.</div>"
-                st.markdown(f"<div class='box'><div class='sec'><i style='background:{KIND_COLOR['pay']}'></i>دریافت</div>{body}</div>",
-                            unsafe_allow_html=True)
+            # سفارش‌ها تمام‌عرض (جدول اقلام زیاد هم کامل دیده می‌شود)، دریافت‌ها زیر آن
+            body = "".join(f"<div class='muted' style='margin-top:6px'>سفارش شمارهٔ {fa(o['id'])}</div>{order_html(o, items_by_order)}"
+                           for o in others_o) or "<div class='muted'>سفارشی ثبت نشده است.</div>"
+            st.markdown(f"<div class='box'><div class='sec'><i style='background:{KIND_COLOR['order']}'></i>سفارش</div>{body}</div>",
+                        unsafe_allow_html=True)
+            if others_o and st.toggle("🖨️ برگهٔ چاپی سفارش" + ("‌ها" if len(others_o) > 1 else ""), key=f"prt_{n}_all"):
+                print_orders([order_doc(o, s, items_by_order) for o in others_o], f"po_{n}_all")
+            body = "".join(pay_html(p) for p in others_p) or "<div class='muted'>دریافتی ثبت نشده است.</div>"
+            st.markdown(f"<div class='box'><div class='sec'><i style='background:{KIND_COLOR['pay']}'></i>دریافت</div>{body}</div>",
+                        unsafe_allow_html=True)
 
         lat, lng = s.get("lat"), s.get("lng")
         if lat and lng:
@@ -795,6 +827,15 @@ def page_map():
             o, f = table(rows, ["👁", "#", "مشتری", "ویزیتور", "تاریخ", "ساعت", "ثبت‌ها"], f"tv_{ver}")
             to_open, focus_n = o or to_open, f or focus_n
         with tabs[1]:
+            if f_orders and st.button(f"🖨️ چاپ برگهٔ {fa(len(f_orders))} سفارش این لیست", key="print_all_orders",
+                                      width="stretch"):
+                ss["dlg_open"] = True
+                docs = [order_doc(o_, s, items_by_order) for s, o_ in f_orders]
+
+                @st.dialog("برگهٔ چاپی سفارش‌ها", width="large", on_dismiss=_closed)
+                def _print_all():
+                    print_orders(docs, "po_all")
+                _print_all()
             rows = [{"_open": (s["n"], "order", int(o_["id"])), "👁": "👁", "#": fa(s["n"]), "شماره": fa(o_["id"]),
                      "مشتری": s["customer"], "ویزیتور": s["visitor"], "تاریخ": jdate(o_["d"]), "مبلغ": money(o_["total"]),
                      "توضیحات": txt(o_["descr"])} for s, o_ in f_orders]
@@ -863,6 +904,21 @@ def _hex_rgba(h, a):
     return f"rgba({int(h[0:2], 16)},{int(h[2:4], 16)},{int(h[4:6], 16)},{a})"
 
 
+FOCUS_ZOOM = 15          # زوم نمایش یک نقطه: سطح خیابان با اطراف آن (۱۸ = حداکثر)
+
+
+def overview_zoom(lats, lngs, w=620, h=540) -> int:
+    """بزرگ‌ترین زومی که همهٔ نقاط در کادر (با حاشیه) جا شوند — Web Mercator"""
+    import math
+    def y(lat):
+        s = math.sin(math.radians(max(min(lat, 85), -85)))
+        return math.log((1 + s) / (1 - s)) / 2
+    dx = max(max(lngs) - min(lngs), 1e-6) / 360
+    dy = max(y(max(lats)) - y(min(lats)), 1e-6) / (2 * math.pi)
+    z = min(math.log2(w / 256 / dx), math.log2(h / 256 / dy))
+    return int(max(3, min(16, math.floor(z))))
+
+
 def draw_map(stops, stop_by_n, focus_n, ver):
     pts = [s for s in stops if s.get("lat") and s.get("lng")]
     visitor_ids = sorted({int(s["visitor_id"]) for s in stops})
@@ -912,8 +968,6 @@ def draw_map(stops, stop_by_n, focus_n, ver):
 
     focus = stop_by_n.get(focus_n) if focus_n else None
     for s in pts:
-        if focus is not None and s is focus:
-            continue
         c = STOP_COLORS[s["ck"]][0]
         folium.Marker(
             [float(s["lat"]), float(s["lng"])],
@@ -922,6 +976,15 @@ def draw_map(stops, stop_by_n, focus_n, ver):
             tooltip=folium.Tooltip(tip_html(s), class_name="pv-tip", sticky=False),
         ).add_to(cluster)
 
+    if pts:
+        lats = [float(s["lat"]) for s in pts]
+        lngs = [float(s["lng"]) for s in pts]
+        m.fit_bounds([[min(lats), min(lngs)], [max(lats), max(lngs)]], padding=(30, 30), max_zoom=16)
+
+    # نقطهٔ انتخاب‌شده: لایهٔ جدا که بدون ساختن دوبارهٔ نقشه اضافه می‌شود؛
+    # نقشه با زوم معقول (سطح خیابان، نه حداکثر) به سمت همان نقطه می‌رود
+    fg = folium.FeatureGroup(name="focus")
+    center, zoom = None, None
     if focus is not None and focus.get("lat") and focus.get("lng"):
         flat, flng = float(focus["lat"]), float(focus["lng"])
         try:
@@ -930,7 +993,7 @@ def draw_map(stops, stop_by_n, focus_n, ver):
             acc_m = None
         c = STOP_COLORS[focus["ck"]][0]
         if acc_m:
-            folium.Circle([flat, flng], radius=acc_m, color=c, weight=1, opacity=.5, fill=True, fill_opacity=.08).add_to(m)
+            folium.Circle([flat, flng], radius=acc_m, color=c, weight=1, opacity=.5, fill=True, fill_opacity=.08).add_to(fg)
         folium.Marker(
             [flat, flng], z_index_offset=10000,
             icon=folium.DivIcon(html=f"<div class='pv-pin pv-focus' style='background:{c};--halo:{_hex_rgba(c, .22)};"
@@ -938,21 +1001,28 @@ def draw_map(stops, stop_by_n, focus_n, ver):
                                 icon_size=(40, 40), icon_anchor=(20, 20)),
             tooltip=folium.Tooltip(f"{fa(focus['n'])}. {esc(focus['customer'])}", permanent=True,
                                    direction="top", offset=(0, -18), class_name="pv-flabel"),
-        ).add_to(m)
-        m.fit_bounds([[flat - .0012, flng - .0012], [flat + .0012, flng + .0012]], max_zoom=18)
+        ).add_to(fg)
+        center, zoom = [flat, flng], FOCUS_ZOOM
     elif pts:
-        lats = [float(s["lat"]) for s in pts]
-        lngs = [float(s["lng"]) for s in pts]
-        m.fit_bounds([[min(lats), min(lngs)], [max(lats), max(lngs)]], padding=(30, 30), max_zoom=16)
+        # نمای کلی: مرکز و زوم از روی محدودهٔ نقاط (صریح، تا نقشه همیشه همهٔ نقاط را نشان دهد)
+        center, zoom = [(min(lats) + max(lats)) / 2, (min(lngs) + max(lngs)) / 2], overview_zoom(lats, lngs)
 
     stabilize(m)
-    out = st_folium(m, key=f"map_{ver}_{focus_n or 0}", height=600, width="stretch",
-                    returned_objects=["last_object_clicked_tooltip"])
+    # کلید نقشه: فقط با تغییر داده‌ها (فیلتر/بازه/ثبت جدید) عوض می‌شود → نقشه از نو و اندازه‌شده روی نقاط؛
+    # کلیک ردیف و باز/بسته شدن جزئیات کلید را عوض نمی‌کند → همان نقشه، فقط حرکت نرم به نقطه
+    sig = zlib.crc32(repr([(s["n"], s.get("lat"), s.get("lng"), s["ck"]) for s in stops]).encode())
+    mkey = f'{st.session_state.setdefault("map_key", 0)}_{sig}'
+    out = st_folium(m, key=f"map_{mkey}", height=600, width="stretch", center=center, zoom=zoom,
+                    feature_group_to_add=fg, returned_objects=["last_object_clicked_tooltip"])
     tip_txt = (out or {}).get("last_object_clicked_tooltip") or ""
     mt = re.match(r"\s*([0-9]+)\.", tip_txt.translate(_EN))
     if not stops:
         st.info("با این فیلترها موردی وجود ندارد. بازه، ویزیتور، مشتری یا کالا را تغییر دهید.")
     if mt and int(mt.group(1)) in stop_by_n:
+        if st.session_state.get("map_click_seen") == (mkey, tip_txt):
+            return None                         # همان کلیک قبلی (بعد از بستن پنجره)
+        st.session_state["map_click_seen"] = (mkey, tip_txt)
+        st.session_state["map_click_used"] = True
         n_ = int(mt.group(1))
         return (n_, stop_by_n[n_]["kind"], None)
     return None
@@ -1164,7 +1234,145 @@ def page_report():
 
 
 # ══════════════════════════════════════════════
-# صفحهٔ ۳: پیام‌ها
+# صفحهٔ ۳: گزارش کالا — هر ویزیتور چه کالاهایی و چه مقدار سفارش گرفته
+# ══════════════════════════════════════════════
+PROD_VIEWS = ["ویزیتور × کالا", "جمع هر کالا", "ویزیتور", "ریز اقلام"]
+
+
+def page_products():
+    bar.markdown(app_bar("📦 گزارش کالا", "کالاهای سفارش‌گرفته‌شده به تفکیک ویزیتور، کالا و ریز اقلام",
+                         [f"👤 {esc(USER['name'])}"]), unsafe_allow_html=True)
+    with st.container(border=True):
+        c1, c2 = st.columns(2)
+        with c1:
+            st.caption("از تاریخ")
+            j0 = jalali_picker("pfrom", jdatetime.date(today_j.year, today_j.month, 1))
+        with c2:
+            st.caption("تا تاریخ")
+            j1 = jalali_picker("pto", today_j)
+        if j1 < j0:
+            j0, j1 = j1, j0
+        g0, g1 = j0.togregorian(), j1.togregorian()
+        try:
+            _, orders, _, items = load_data(g0.isoformat(), g1.isoformat(), ALLOWED)
+        except Exception as e:
+            st.error(f"❌ خطای دیتابیس: {e}")
+            return
+        vnames = {int(r["id"]): r["full_name"] for _, r in vis_df.iterrows()}
+        pnames = dict(zip(items["code"].astype(str), items["name"])) if len(items) else {}
+        cnames = {str(r.customer_code): r.customer for r in orders.itertuples()}
+        r1 = st.columns([1.2, 1.4, 1.2, 1])
+        f_v = r1[0].multiselect("ویزیتورها", list(vnames), format_func=lambda v: vnames[v], placeholder="همه", key="p_v")
+        f_p = r1[1].multiselect("کالاها", sorted(pnames, key=lambda c: pnames[c]),
+                                format_func=lambda c: f"{pnames[c]} ({fa(c)})", placeholder="همه", key="p_p")
+        f_c = r1[2].multiselect("مشتری‌ها", sorted(cnames, key=lambda c: cnames[c]),
+                                format_func=lambda c: f"{cnames[c]} ({fa(c)})", placeholder="همه", key="p_c")
+        view = r1[3].selectbox("نمایش", PROD_VIEWS, key="p_view")
+
+    om = {int(r["id"]): r for r in orders.to_dict("records")}
+    lines = []
+    for it in items.to_dict("records"):
+        o = om.get(int(it["order_id"]))
+        if o is None or (f_v and int(o["visitor_id"]) not in f_v) or (f_c and str(o["customer_code"]) not in f_c) \
+                or (f_p and str(it["code"]) not in f_p):
+            continue
+        q, pr = float(it["qty"] or 0), float(it["price"] or 0)
+        lines.append({"تاریخ": jdate(o["d"]), "ساعت": hhmm(o["t"]), "سفارش": fa(o["id"]), "ویزیتور": o["visitor"],
+                      "مشتری": o["customer"], "کد کالا": str(it["code"]), "کالا": it["name"], "تعداد": q,
+                      "فی (ریال)": pr, "مبلغ (ریال)": q * pr, "_d": str(o["d"]), "_vid": int(o["visitor_id"])})
+    lines.sort(key=lambda x: (x["_d"], x["ساعت"], x["سفارش"]))
+
+    tot_q = sum(l["تعداد"] for l in lines)
+    tot_a = sum(l["مبلغ (ریال)"] for l in lines)
+    n_ord = len({l["سفارش"] for l in lines})
+    n_prod = len({l["کد کالا"] for l in lines})
+    amt = f" · {money(tot_a)}" if SHOW_MONEY else ""
+    st.markdown("<div class='legend' style='margin-top:6px'>"
+                f"<span><i style='background:{KIND_COLOR['order']}'></i>{fa(n_ord)} سفارش{amt}</span>"
+                f"<span>{fa(n_prod)} کالای مختلف</span><span>جمع تعداد: <b>{fa(format(tot_q, 'g'))}</b></span>"
+                f"<span>{fa(len(lines))} ردیف قلم · {range_text(j0, j1, g0, g1)}</span></div>", unsafe_allow_html=True)
+    if not lines:
+        st.info("در این بازه و با این فیلترها سفارشی ثبت نشده است.")
+        return
+
+    m_cols = ["مبلغ (ریال)"] if SHOW_MONEY else []
+
+    def agg(keyf, first):
+        out = {}
+        for l in lines:
+            k = keyf(l)
+            a = out.setdefault(k, {**first(l), "تعداد": 0.0, "سفارش‌ها": set(), "مبلغ (ریال)": 0.0})
+            a["تعداد"] += l["تعداد"]; a["سفارش‌ها"].add(l["سفارش"]); a["مبلغ (ریال)"] += l["مبلغ (ریال)"]
+        for a in out.values():
+            a["سفارش‌ها"] = len(a["سفارش‌ها"])
+        return list(out.values())
+
+    by_vp = agg(lambda l: (l["_vid"], l["کد کالا"]),
+                lambda l: {"ویزیتور": l["ویزیتور"], "کالا": l["کالا"], "کد کالا": l["کد کالا"]})
+    by_vp.sort(key=lambda a: (a["ویزیتور"], -a["تعداد"]))
+    by_p = agg(lambda l: l["کد کالا"], lambda l: {"کالا": l["کالا"], "کد کالا": l["کد کالا"]})
+    by_p.sort(key=lambda a: -a["تعداد"])
+    by_v = agg(lambda l: l["_vid"], lambda l: {"ویزیتور": l["ویزیتور"]})
+    for a in by_v:
+        a["کالای مختلف"] = len({l["کد کالا"] for l in lines if l["ویزیتور"] == a["ویزیتور"]})
+    by_v.sort(key=lambda a: -a["مبلغ (ریال)"])
+
+    # ردیف جمع کل برای هر جدول خلاصه
+    def with_total(rows, label_col):
+        total = {label_col: "جمع کل", "تعداد": sum(r["تعداد"] for r in rows),
+                 "مبلغ (ریال)": sum(r["مبلغ (ریال)"] for r in rows), "سفارش‌ها": n_ord}
+        return rows + [total]
+
+    sections = {
+        "ویزیتور × کالا": (["ویزیتور", "کالا", "کد کالا", "تعداد", "سفارش‌ها"] + m_cols, with_total(by_vp, "ویزیتور")),
+        "جمع هر کالا": (["کالا", "کد کالا", "تعداد", "سفارش‌ها"] + m_cols, with_total(by_p, "کالا")),
+        "ویزیتور": (["ویزیتور", "کالای مختلف", "تعداد", "سفارش‌ها"] + m_cols, with_total(by_v, "ویزیتور")),
+        "ریز اقلام": (["تاریخ", "ساعت", "سفارش", "ویزیتور", "مشتری", "کالا", "کد کالا", "تعداد"]
+                      + (["فی (ریال)", "مبلغ (ریال)"] if SHOW_MONEY else []), lines),
+    }
+    cols, rows = sections[view]
+
+    def show(rows, cols, height):
+        df = pd.DataFrame([{c: (report.fmt(r.get(c), c) if r.get(c) not in ("", None) else "—") for c in cols}
+                           for r in rows], columns=cols)
+        st.dataframe(df[cols[::-1]], hide_index=True, width="stretch", height=height)
+
+    st.markdown(f"<div class='sec'>{view}</div>", unsafe_allow_html=True)
+    show(rows, cols, min(520, 38 + 35 * len(rows)))
+    if view != "ریز اقلام":
+        with st.expander(f"ریز اقلام ({fa(len(lines))} ردیف)"):
+            show(lines, sections["ریز اقلام"][0], min(460, 38 + 35 * len(lines)))
+
+    if CAN_EXPORT:
+        meta = [("گزارش", "کالاهای سفارش‌گرفته‌شده"), ("بازه", range_text(j0, j1, g0, g1))]
+        for lbl, vals, names in (("ویزیتور", f_v, vnames), ("کالا", f_p, pnames), ("مشتری", f_c, cnames)):
+            if vals:
+                meta.append((lbl, "، ".join(str(names[v]) for v in vals)))
+        meta.append(("جمع", f"{fa(n_ord)} سفارش · {fa(n_prod)} کالا · تعداد {fa(format(tot_q, 'g'))}{amt}"))
+        clean = lambda rs, cs: [{c: r.get(c) for c in cs} for r in rs]
+        secs = [(name, sections[name][0], clean(sections[name][1], sections[name][0])) for name in PROD_VIEWS]
+        fz, mt = freeze(secs), tuple(meta)
+        fname = f"PeechaVisit_Products_{j0.strftime('%Y%m%d')}_{j1.strftime('%Y%m%d')}"
+        e1, e2, e3, _ = st.columns([1, 1, 1, 3])
+        e1.download_button("📥 Excel", data=cached_excel(mt, fz), file_name=f"{fname}.xlsx", width="stretch",
+                           on_click="ignore", key="p_xl")
+        try:
+            e2.download_button("📄 PDF", data=cached_pdf(mt, fz), file_name=f"{fname}.pdf", mime="application/pdf",
+                               width="stretch", on_click="ignore", key="p_pdf")
+        except Exception as e:
+            e2.caption(f"PDF ساخته نشد: {e}")
+        if e3.button("🖨️ چاپ", width="stretch", key="p_print"):
+            st.session_state["dlg_open"] = True
+
+            @st.dialog("پیش‌نمایش چاپ", width="large", on_dismiss=_closed)
+            def _print():
+                components.html(report.to_html(meta, secs, font_css()), height=640, scrolling=True)
+            _print()
+
+
+
+# ══════════════════════════════════════════════
+# صفحهٔ ۴: پیام‌ها
 # ══════════════════════════════════════════════
 def page_messages():
     ss = st.session_state
@@ -1199,7 +1407,8 @@ def page_messages():
                                FROM messages WHERE (sender_id=? AND recipient_id=?) OR (sender_id=? AND recipient_id=?)
                                ORDER BY id DESC""", (me, who, who, me)).iloc[::-1]
             bubbles = "".join(
-                f"<div class='bub {'me' if int(r.sender_id) == me else 'them'}'>{esc(r.body)}"
+                f"<div class='bub {'me' if int(r.sender_id) == me else 'them'}'>"
+                f"<b class='who'>{'شما' if int(r.sender_id) == me else esc(names.get(int(r.sender_id), ''))}</b>{esc(r.body)}"
                 f"<small>{jdate(r.at[:10])} {fa(r.at[11:16])}</small></div>" for r in conv.itertuples()) \
                 or "<div class='muted' style='margin:auto'>هنوز پیامی رد و بدل نشده است.</div>"
             st.markdown(f"<div class='chat' id='chatbox'>{bubbles}</div>", unsafe_allow_html=True)
@@ -1220,7 +1429,7 @@ def page_messages():
 
 
 # ══════════════════════════════════════════════
-# صفحهٔ ۴: لاگ ورود و فعالیت (فقط مدیر)
+# صفحهٔ ۵: لاگ ورود و فعالیت (فقط مدیر)
 # ══════════════════════════════════════════════
 def page_logs():
     bar.markdown(app_bar("📜 لاگ ورود و فعالیت", "ورود به اپ، داشبورد و پنل مدیریت؛ ثبت‌ها و پیام‌ها با دستگاه",
@@ -1304,7 +1513,7 @@ def _max_ids():
 
 
 def _go_messages(sender_name):
-    st.session_state["page"] = PAGES[2]
+    st.session_state["page"] = P_MSGS
     st.session_state["_go_rerun"] = True
     st.session_state.notes = [n for n in st.session_state.get("notes", []) if n["t"] != "messages"]
 
@@ -1363,13 +1572,15 @@ def live():
 # ══════════════════════════════════════════════
 # اجرا
 # ══════════════════════════════════════════════
-if page == PAGES[0]:
+if page == P_MAP:
     page_map()
-elif page == PAGES[1]:
+elif page == P_REPORT:
     page_report()
-elif page == PAGES[2]:
+elif page == P_PRODUCTS:
+    page_products()
+elif page == P_MSGS:
     page_messages()
-elif page == PAGES[3] and IS_ADMIN:
+elif page == P_LOGS and IS_ADMIN:
     page_logs()
 
 live()

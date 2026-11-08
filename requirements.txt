@@ -17,6 +17,9 @@ pandas>=2.0
 folium>=0.15
 streamlit-folium>=0.18
 
+# عکس‌ها (کوچک‌سازی برای داشبورد و اپ)
+Pillow>=10.0
+
 # تاریخ شمسی
 jdatetime>=4.1
 

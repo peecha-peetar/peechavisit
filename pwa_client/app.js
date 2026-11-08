@@ -215,6 +215,23 @@ function applyRules(r) {
 }
 
 const fmt = n => Number(n || 0).toLocaleString('fa-IR');
+
+// ══════════════════════════════════════════
+// مبلغ: ارقام فارسی با جداکنندهٔ سه‌رقمی، هنگام تایپ هم
+// ══════════════════════════════════════════
+const toLatinDigits = s => String(s ?? '').replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d))
+                                          .replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d));
+const parseAmt = s => Number(toLatinDigits(s).replace(/[^0-9]/g, '')) || 0;
+function formatMoneyInput(el) {
+    const digits = toLatinDigits(el.value).replace(/[^0-9]/g, '').replace(/^0+(?=\d)/, '');
+    // تعداد رقم‌های بعد از مکان‌نما ثابت می‌ماند تا مکان‌نما نپرد
+    const after = toLatinDigits(el.value.slice(el.selectionStart ?? el.value.length)).replace(/[^0-9]/g, '').length;
+    el.value = digits ? Number(digits).toLocaleString('fa-IR') : '';
+    let pos = el.value.length, seen = 0;
+    while (pos > 0 && seen < after) { pos--; if (/[۰-۹]/.test(el.value[pos])) seen++; }
+    try { el.setSelectionRange(pos, pos); } catch { }
+}
+document.addEventListener('input', e => { if (e.target.classList && e.target.classList.contains('money-input')) formatMoneyInput(e.target); });
 const escHtml = v => String(v ?? '').replace(/[&<>"']/g,
     c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -618,7 +635,7 @@ function getJalaliDate(prefix) {
 
 function buildPaymentInfo() {
     const t = document.getElementById("pay-type").value;
-    const info = { type:t, amount:parseFloat(document.getElementById("pay-amount").value||0) };
+    const info = { type:t, amount:parseAmt(document.getElementById("pay-amount").value) };
     if (t==="چک") {
         info.check_number  = document.getElementById("check-number").value.trim();
         info.check_sayyadi = document.getElementById("check-sayyadi").value.trim();
@@ -651,7 +668,7 @@ function submitIntegratedForm() {
     if (appRules.REQUIRE_SELFIE && !selfie) { alert("⚠️ عکس سلفی الزامی است."); return; }
     if (currentMode==="order" && !orderBasket.length) { alert("⚠️ سبد سفارش خالی است."); return; }
     if (currentMode==="pay") {
-        const amt = parseFloat(document.getElementById("pay-amount").value||0);
+        const amt = parseAmt(document.getElementById("pay-amount").value);
         if (!amt||amt<=0) { alert("⚠️ مبلغ دریافت را وارد کنید."); return; }
     }
 
@@ -879,6 +896,7 @@ function repDates(r) {
     const to = localDateStr(now);
     if (r === 'week') { const f = new Date(now); f.setDate(f.getDate() - 6); return [localDateStr(f), to]; }
     if (r === 'month') { const [jy, jm] = todayJalali(); return [jalaliToGregorian(jy, jm, 1), to]; }
+    if (r === 'q3') { const f = new Date(now); f.setDate(f.getDate() - 89); return [localDateStr(f), to]; }
     return [to, to];
 }
 
@@ -923,21 +941,91 @@ function renderQueue() {
     };
 }
 
+let repData = null;
 function renderReport(d, stamp) {
+    repData = d;
     const sum = (a, k) => a.reduce((t, x) => t + (x[k] || 0), 0);
     const money = n => appRules.SHOW_PRICE ? `<small>${fmt(n)} ریال</small>` : '';
     document.getElementById('rep-kpis').innerHTML =
         `<div><b>${fmt(d.visits.length)}</b><span>ویزیت</span></div>` +
         `<div><b>${fmt(d.orders.length)}</b><span>سفارش</span>${money(sum(d.orders, 'total'))}</div>` +
         `<div><b>${fmt(d.payments.length)}</b><span>دریافت</span>${money(sum(d.payments, 'amount'))}</div>`;
-    const row = (name, date, time, extra, amount) => `<div class="rep-row"><div class="info">
+    const row = (kind, id, name, date, time, extra, amount) => `<div class="rep-row tap" onclick="openRepDetail('${kind}',${Number(id) || 0})"><div class="info">
         <div class="n">${escHtml(name)}</div><div class="d">${jdateFa(date)} · ${faDigits(time)}${extra ? ' · ' + extra : ''}</div></div>
-        ${amount !== undefined && appRules.SHOW_PRICE ? `<div class="a">${fmt(amount)}</div>` : ''}</div>`;
-    document.getElementById('rep-visits').innerHTML = d.visits.map(v => row(v.customer, v.date, v.time, escHtml(v.description || ''))).join('');
-    document.getElementById('rep-orders').innerHTML = d.orders.map(o => row(o.customer, o.date, o.time, `${fmt(o.items)} قلم`, o.total)).join('');
-    document.getElementById('rep-pays').innerHTML = d.payments.map(p => row(p.customer, p.date, p.time, `<span class="tag">${escHtml(p.type)}</span>`, p.amount)).join('');
+        ${amount !== undefined && appRules.SHOW_PRICE ? `<div class="a">${fmt(amount)}</div>` : ''}<span class="chev">‹</span></div>`;
+    document.getElementById('rep-visits').innerHTML = d.visits.map(v => row('visit', v.id, v.customer, v.date, v.time,
+        escHtml(v.description || '') + (v.selfie ? ' 📷' : ''))).join('');
+    document.getElementById('rep-orders').innerHTML = d.orders.map(o => row('order', o.id, o.customer, o.date, o.time,
+        `${fmt(o.items ?? (o.lines || []).length)} قلم`, o.total)).join('');
+    document.getElementById('rep-pays').innerHTML = d.payments.map(p => row('pay', p.id, p.customer, p.date, p.time,
+        `<span class="tag">${escHtml(p.type)}</span>${p.image ? ' 📷' : ''}`, p.amount)).join('');
     document.getElementById('rep-stamp').textContent = stamp;
 }
+
+// ── جزئیات یک ثبت ──
+const imgCache = {};
+function loadMyImage(path, holder) {
+    const show = src => { holder.innerHTML = `<img src="${src}" alt="" onclick="showFullImg(this.src)">`; };
+    if (imgCache[path]) { show(imgCache[path]); return; }
+    if (!navigator.onLine) { holder.innerHTML = '<div class="hint">برای دیدن عکس به سرور وصل شوید.</div>'; return; }
+    holder.innerHTML = '<div class="hint">در حال دریافت عکس...</div>';
+    apiFetch(`/my-image?path=${encodeURIComponent(path)}`).then(r => r.json()).then(d => {
+        if (d.status !== 'success') { holder.innerHTML = `<div class="hint">${escHtml(d.message || 'عکس دریافت نشد')}</div>`; return; }
+        imgCache[path] = d.data; show(d.data);
+    }).catch(() => { holder.innerHTML = '<div class="hint">عکس دریافت نشد.</div>'; });
+}
+function showFullImg(src) { const w = document.getElementById('img-full'); w.querySelector('img').src = src; w.hidden = false; }
+
+function openRepDetail(kind, id) {
+    if (!repData) return;
+    const kv = rows => '<div class="kv">' + rows.filter(r => r[1]).map(([k, v]) => `<div><small>${k}</small><b>${v}</b></div>`).join('') + '</div>';
+    const note = (t, label) => t ? `<div class="note"><b>${label}:</b> ${escHtml(t)}</div>` : '';
+    const imgs = [];
+    let title = '', body = '';
+    if (kind === 'visit') {
+        const v = repData.visits.find(x => x.id === id); if (!v) return;
+        title = `ویزیت — ${escHtml(v.customer)}`;
+        body = kv([['تاریخ', jdateFa(v.date)], ['ساعت', faDigits(v.time)], ['کد مشتری', faDigits(v.customer_code)]])
+             + note(v.description, 'توضیح ویزیت');
+        // سفارش و دریافت همان ویزیت
+        const same = x => x.customer_code === v.customer_code && x.date === v.date && x.time === v.time;
+        repData.orders.filter(same).forEach(o => { body += `<div class="sec">سفارش شمارهٔ ${faDigits(o.id)}</div>` + orderLines(o); });
+        repData.payments.filter(same).forEach(p => { body += `<div class="sec">دریافت ${escHtml(p.type)}</div>` + payInfo(p, kv, note); if (p.image) imgs.push([p.image, p.type === 'چک' ? 'عکس چک' : 'رسید حواله']); });
+        if (v.selfie) imgs.unshift([v.selfie, 'سلفی']);
+    } else if (kind === 'order') {
+        const o = repData.orders.find(x => x.id === id); if (!o) return;
+        title = `سفارش شمارهٔ ${faDigits(o.id)} — ${escHtml(o.customer)}`;
+        body = kv([['تاریخ', jdateFa(o.date)], ['ساعت', faDigits(o.time)], ['کد مشتری', faDigits(o.customer_code)]]) + orderLines(o);
+    } else {
+        const p = repData.payments.find(x => x.id === id); if (!p) return;
+        title = `دریافت ${escHtml(p.type)} — ${escHtml(p.customer)}`;
+        body = kv([['تاریخ', jdateFa(p.date)], ['ساعت', faDigits(p.time)]]) + payInfo(p, kv, note);
+        if (p.image) imgs.push([p.image, p.type === 'چک' ? 'عکس چک' : 'رسید حواله']);
+    }
+    body += imgs.map((im, i) => `<div class="sec">${im[1]}</div><div class="rep-img" id="rep-img-${i}"></div>`).join('');
+    document.getElementById('rep-detail-title').innerHTML = title;
+    document.getElementById('rep-detail-body').innerHTML = body;
+    document.getElementById('rep-detail').hidden = false;
+    imgs.forEach((im, i) => loadMyImage(im[0], document.getElementById(`rep-img-${i}`)));
+}
+function orderLines(o) {
+    const lines = o.lines || [];
+    if (!lines.length) return '<div class="hint">اقلام این سفارش در گزارش نیست.</div>';
+    const pr = appRules.SHOW_PRICE;
+    const rows = lines.map((l, i) => `<tr><td>${faDigits(i + 1)}</td><td>${escHtml(l.name)}<div class="hint">کد ${faDigits(l.code)}</div></td>
+        <td>${fmt(l.qty)}</td>${pr ? `<td>${fmt(l.price)}</td><td>${fmt(l.qty * l.price)}</td>` : ''}</tr>`).join('');
+    const qty = lines.reduce((t, l) => t + l.qty, 0);
+    return `<div class="itm-wrap"><table class="itm"><thead><tr><th>#</th><th>کالا</th><th>تعداد</th>${pr ? '<th>فی</th><th>جمع</th>' : ''}</tr></thead>
+        <tbody>${rows}</tbody><tfoot><tr><td></td><td>جمع ${faDigits(lines.length)} قلم</td><td>${fmt(qty)}</td>${pr ? `<td></td><td>${fmt(o.total)}</td>` : ''}</tr></tfoot></table></div>`
+        + (o.description ? `<div class="note"><b>توضیح سفارش:</b> ${escHtml(o.description)}</div>` : '');
+}
+function payInfo(p, kv, note) {
+    const rows = [['نوع', escHtml(p.type)], ['مبلغ', appRules.SHOW_PRICE ? `${fmt(p.amount)} ریال` : '']];
+    if (p.type === 'چک') rows.push(['شماره چک', faDigits(p.check_number)], ['شماره صیادی', faDigits(p.check_sayyadi)], ['سررسید', p.check_due ? jdateFa(p.check_due) : '']);
+    if (p.type === 'حواله') rows.push(['حساب / کارت مقصد', `<span dir="ltr">${faDigits(p.account)}</span>`], ['شماره پیگیری', faDigits(p.tracking)]);
+    return kv(rows) + note(p.description, 'توضیح دریافت');
+}
+function closeRepDetail() { document.getElementById('rep-detail').hidden = true; }
 
 function loadReport() {
     const range = repRange;
@@ -989,7 +1077,7 @@ const contactName = id => id === 'all' ? 'همه' :
      || (msgState.list.find(m => m.from === id && m.from_name) || {}).from_name || 'کاربر');
 const timeFa = at => { const [d, t] = String(at || '').split(' '); return `${jdateFa(d)} ${faDigits((t || '').slice(0, 5))}`; };
 
-function unreadFrom(id) { return msgState.list.filter(m => m.to === msgState.me && !m.read && (id == null || m.from === id)).length; }
+function unreadFrom(id) { return msgState.list.filter(m => Number(m.to) === Number(msgState.me) && !m.read && (id == null || Number(m.from) === Number(id))).length; }
 function updateMsgBadge() {
     const n = unreadFrom(null), b = document.getElementById('msg-badge');
     b.textContent = faDigits(n); b.style.display = n ? 'inline-block' : 'none';
@@ -1029,8 +1117,9 @@ function openMsgs() {
     renderContacts();
     if (navigator.onLine) {
         apiFetch('/contacts').then(r => r.json()).then(d => {
-            if (d.status === 'success') { msgState.contacts = d.contacts; saveMsgState(); renderContacts(); }
-        }).catch(() => { });
+            if (d.status === 'success') { msgState.contacts = d.contacts; msgState.peer = d.peer; saveMsgState(); renderContacts(); }
+            else document.getElementById('msg-stamp').textContent = '❌ ' + (d.message || 'لیست کاربران دریافت نشد.');
+        }).catch(err => { if (err.message !== 'TOKEN_EXPIRED') document.getElementById('msg-stamp').textContent = '❌ اتصال به سرور برقرار نشد؛ لیست کاربران دریافت نشد.'; });
         pollMessages(false);
     }
 }
@@ -1038,7 +1127,7 @@ function openMsgs() {
 function renderContacts() {
     const sess = getSession() || {};
     const rows = msgState.contacts.map(c => {
-        const conv = msgState.list.filter(m => m.from === c.id || m.to === c.id);
+        const conv = msgState.list.filter(m => Number(m.from) === Number(c.id) || Number(m.to) === Number(c.id));
         const last = conv[conv.length - 1];
         return { c, last, unread: unreadFrom(c.id) };
     }).sort((a, b) => (b.last ? b.last.id : 0) - (a.last ? a.last.id : 0));
@@ -1050,7 +1139,8 @@ function renderContacts() {
         (sess.role === 'admin' ? item('all', 'پیام به همه', 'ارسال یک پیام برای همهٔ کاربران', 0, '📣') : '') +
         rows.map(r => item(r.c.id, r.c.name + (r.c.role === 'admin' ? ' (مدیر)' : ''),
             r.last ? r.last.body : 'هنوز پیامی نیست', r.unread, escHtml((r.c.name || '؟')[0]))).join('');
-    document.getElementById('msg-stamp').textContent = navigator.onLine ? '' :
+    document.getElementById('msg-stamp').textContent = navigator.onLine
+        ? (msgState.peer === false && sess.role !== 'admin' ? 'طبق تنظیم مدیر، فقط مدیران در لیست گفتگو هستند.' : '') :
         (msgState.contacts.length ? 'حالت آفلاین — آخرین پیام‌های ذخیره‌شده' : 'برای دیدن پیام‌ها به سرور وصل شوید.');
 }
 
@@ -1064,15 +1154,16 @@ function openChat(id) {
     renderChat();
     if (id !== 'all' && unreadFrom(id) && navigator.onLine) {
         apiFetch('/messages/read', { method: 'POST', body: JSON.stringify({ with: id }) }).catch(() => { });
-        msgState.list.forEach(m => { if (m.from === id && m.to === msgState.me) m.read = true; });
+        msgState.list.forEach(m => { if (Number(m.from) === Number(id) && Number(m.to) === Number(msgState.me)) m.read = true; });
         saveMsgState(); updateMsgBadge();
     }
 }
 
 function renderChat() {
     const box = document.getElementById('chat-msgs');
-    const conv = chatWith === 'all' ? [] : msgState.list.filter(m => m.from === chatWith || m.to === chatWith);
-    box.innerHTML = conv.length ? conv.map(m => `<div class="bubble ${m.from === msgState.me ? 'me' : 'them'}">${escHtml(m.body)}<small>${timeFa(m.at)}</small></div>`).join('')
+    const conv = chatWith === 'all' ? [] : msgState.list.filter(m => Number(m.from) === Number(chatWith) || Number(m.to) === Number(chatWith));
+    const mine = m => Number(m.from) === Number(msgState.me);
+    box.innerHTML = conv.length ? conv.map(m => `<div class="bubble ${mine(m) ? 'me' : 'them'}"><b class="who">${mine(m) ? 'شما' : escHtml(m.from_name || contactName(m.from))}</b>${escHtml(m.body)}<small>${timeFa(m.at)}</small></div>`).join('')
         : `<div class="hint" style="text-align:center;margin-top:20px">${chatWith === 'all' ? 'این پیام برای همهٔ کاربران فرستاده می‌شود.' : 'هنوز پیامی رد و بدل نشده است.'}</div>`;
     box.scrollTop = box.scrollHeight;
 }

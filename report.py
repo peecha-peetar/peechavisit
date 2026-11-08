@@ -171,3 +171,91 @@ td.n {{ white-space:nowrap; }}
         parts.append("</tbody></table>")
     parts.append("</body></html>")
     return "".join(parts)
+
+
+# ════════════════════════════════════════════════
+# برگهٔ چاپی سفارش (هر سفارش یک صفحهٔ A4)
+# ════════════════════════════════════════════════
+def _fa(v) -> str:
+    return str(v if v is not None else "").translate(str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹"))
+
+
+def _num(v) -> str:
+    try:
+        v = float(v or 0)
+    except (TypeError, ValueError):
+        return _esc(v)
+    return _fa(f"{v:,.0f}" if v == int(v) else f"{v:,.2f}").replace(",", "٬")
+
+
+def orders_html(orders, show_money: bool, font_css: str = "", company: str = "پیچا ویزیت") -> str:
+    """orders: [{id, date, weekday, time, visitor, customer, customer_code, lines:[{code,name,qty,price}],
+    total, description}] — خروجی: صفحهٔ HTML آمادهٔ چاپ با سربرگ"""
+    css = f"""<!DOCTYPE html><html lang="fa" dir="rtl"><head><meta charset="utf-8">
+<title>برگهٔ سفارش</title>{font_css}
+<style>
+body {{ font-family: Vazirmatn, Tahoma, sans-serif; color:#17202e; margin:14px; font-size:13px; background:#eef1f6; }}
+.page {{ background:#fff; max-width:190mm; margin:0 auto 14px; padding:12mm 12mm 10mm; border-radius:8px;
+         box-shadow:0 2px 10px rgba(16,24,40,.08); }}
+.head {{ display:flex; justify-content:space-between; align-items:flex-start; border-bottom:3px solid #020025;
+         padding-bottom:8px; margin-bottom:10px; }}
+.head h1 {{ font-size:20px; margin:0; }} .head .co {{ font-size:13px; color:#495057; margin-top:2px; }}
+.head .no {{ text-align:left; }} .head .no b {{ display:block; font-size:18px; }}
+.head .no small {{ color:#6b7686; }}
+.info {{ display:grid; grid-template-columns:repeat(3, 1fr); gap:6px 14px; margin-bottom:12px; }}
+.info div {{ border:1px solid #e3e7ef; border-radius:6px; padding:5px 8px; }}
+.info small {{ display:block; color:#6b7686; font-size:11px; }} .info b {{ font-size:13px; }}
+table {{ width:100%; border-collapse:collapse; }}
+th, td {{ border:1px solid #cfd4dc; padding:5px 6px; text-align:right; vertical-align:top; }}
+th {{ background:#020025; color:#fff; font-weight:700; }}
+tbody tr:nth-child(even) td {{ background:#f6f7fa; }}
+td.n {{ white-space:nowrap; text-align:left; direction:ltr; }} td.c {{ text-align:center; width:28px; }}
+tfoot td {{ font-weight:800; background:#eef1f6; }}
+.note {{ border:1px dashed #cfd4dc; border-radius:6px; padding:6px 8px; margin-top:10px; }}
+.sign {{ display:flex; justify-content:space-between; margin-top:28px; color:#495057; }}
+.sign div {{ width:40%; border-top:1px solid #adb5bd; padding-top:4px; text-align:center; }}
+.foot {{ margin-top:12px; color:#adb5bd; font-size:10px; text-align:center; }}
+.bar {{ position:sticky; top:0; background:#eef1f6; padding:6px 0 10px; z-index:2; }}
+.bar button {{ font:700 14px Vazirmatn, Tahoma, sans-serif; background:#3b5bdb; color:#fff; border:0;
+              border-radius:8px; padding:8px 18px; cursor:pointer; }}
+.bar span {{ color:#6b7686; font-size:12px; margin-right:10px; }}
+@media print {{ body {{ background:#fff; margin:0; }} .bar {{ display:none; }}
+  .page {{ box-shadow:none; border-radius:0; margin:0; padding:0; max-width:none; page-break-after:always; }}
+  .page:last-child {{ page-break-after:auto; }}
+  th, tfoot td, tbody tr:nth-child(even) td {{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }}
+  thead {{ display:table-header-group; }} tr {{ page-break-inside:avoid; }} }}
+@page {{ size:A4 portrait; margin:10mm; }}
+</style></head><body>
+<div class="bar"><button onclick="window.print()">🖨️ چاپ / ذخیره PDF</button>
+<span>{_fa(len(orders))} سفارش · هر سفارش در یک صفحه</span></div>"""
+    parts = [css]
+    for o in orders:
+        lines = o.get("lines") or []
+        head = "<th class='c'>#</th><th>کد کالا</th><th>شرح کالا</th><th>تعداد</th>" + \
+               ("<th>فی (ریال)</th><th>مبلغ (ریال)</th>" if show_money else "")
+        rows = "".join(
+            f"<tr><td class='c'>{_fa(i + 1)}</td><td class='n'>{_fa(_esc(l['code']))}</td><td>{_esc(l['name'])}</td>"
+            f"<td class='n'>{_num(l['qty'])}</td>"
+            + (f"<td class='n'>{_num(l['price'])}</td><td class='n'>{_num(float(l['qty'] or 0) * float(l['price'] or 0))}</td>"
+               if show_money else "") + "</tr>"
+            for i, l in enumerate(lines)) or f"<tr><td colspan='{6 if show_money else 4}'>اقلامی ثبت نشده است.</td></tr>"
+        qty = sum(float(l["qty"] or 0) for l in lines)
+        foot = (f"<tr><td colspan='3'>جمع {_fa(len(lines))} قلم</td><td class='n'>{_num(qty)}</td>"
+                + (f"<td></td><td class='n'>{_num(o.get('total'))}</td>" if show_money else "") + "</tr>")
+        note = f"<div class='note'><b>توضیحات:</b> {_esc(o['description'])}</div>" if o.get("description") else ""
+        parts.append(f"""<div class="page">
+<div class="head"><div><h1>برگهٔ سفارش فروش</h1><div class="co">{_esc(company)}</div></div>
+<div class="no"><small>شمارهٔ سفارش</small><b>{_fa(o['id'])}</b><small>{_esc(o.get('weekday', ''))} {_fa(o['date'])} · ساعت {_fa(o['time'])}</small></div></div>
+<div class="info">
+<div><small>مشتری</small><b>{_esc(o['customer'])}</b></div>
+<div><small>کد مشتری</small><b>{_fa(_esc(o['customer_code']))}</b></div>
+<div><small>ویزیتور</small><b>{_esc(o['visitor'])}</b></div>
+</div>
+<table><thead><tr>{head}</tr></thead><tbody>{rows}</tbody><tfoot>{foot}</tfoot></table>
+{note}
+<div class="sign"><div>امضای ویزیتور</div><div>امضا و مهر مشتری</div></div>
+<div class="foot">چاپ‌شده از پیچا ویزیت · {_esc(stamp())}</div>
+</div>""")
+    parts.append("</body></html>")
+    return "".join(parts)
+

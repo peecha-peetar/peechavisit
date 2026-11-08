@@ -328,45 +328,69 @@ def sync_data():
 @app.route('/api/my-report', methods=['GET'])
 @require_auth
 def my_report():
+    """گزارش کار خود ویزیتور با جزئیات: اقلام سفارش، جزئیات دریافت، عکس‌ها"""
     vid = request.current_user['visitor_id']
     try:
         d0 = datetime.strptime(request.args.get('from', ''), '%Y-%m-%d').date()
         d1 = datetime.strptime(request.args.get('to', ''), '%Y-%m-%d').date()
     except ValueError:
         return jsonify({"status":"error","message":"بازهٔ تاریخ نامعتبر است"}), 400
-    if (d1 - d0).days > 92:
-        return jsonify({"status":"error","message":"بازهٔ گزارش حداکثر سه ماه است"}), 400
+    if (d1 - d0).days > 370:
+        return jsonify({"status":"error","message":"بازهٔ گزارش حداکثر یک سال است"}), 400
     try:
         conn = get_conn(); cur = conn.cursor()
         cust = f"[{SALES_DB}].dbo.customer"
+        art = f"[{SALES_DB}].dbo.article"
         cur.execute(f"""
-            SELECT v.visit_date, CONVERT(VARCHAR(5), v.visit_time, 108), v.customer_code,
-                   CAST(c.C_Name AS NVARCHAR(200)), ISNULL(v.description,'')
+            SELECT v.id, v.visit_date, CONVERT(VARCHAR(5), v.visit_time, 108), v.customer_code,
+                   CAST(c.C_Name AS NVARCHAR(200)), ISNULL(v.description,''), ISNULL(v.selfie_path,'')
             FROM visits v LEFT JOIN {cust} c ON c.C_Code = v.customer_code
             WHERE v.visitor_id=? AND v.visit_date BETWEEN ? AND ?
             ORDER BY v.visit_date DESC, v.visit_time DESC""", (vid, d0, d1))
-        visits = [{"date": str(r[0]), "time": r[1], "customer_code": r[2],
-                   "customer": fa_text(r[3]) or r[2], "description": r[4]} for r in cur.fetchall()]
+        visits = [{"id": r[0], "date": str(r[1]), "time": r[2], "customer_code": r[3],
+                   "customer": fa_text(r[4]) or r[3], "description": r[5], "selfie": r[6]} for r in cur.fetchall()]
         cur.execute(f"""
             SELECT o.id, o.order_date, CONVERT(VARCHAR(5), o.order_time, 108), o.customer_code,
-                   CAST(c.C_Name AS NVARCHAR(200)), o.total_amount,
-                   (SELECT COUNT(*) FROM order_items WHERE order_id=o.id)
+                   CAST(c.C_Name AS NVARCHAR(200)), o.total_amount, ISNULL(o.description,'')
             FROM orders o LEFT JOIN {cust} c ON c.C_Code = o.customer_code
             WHERE o.visitor_id=? AND o.order_date BETWEEN ? AND ?
             ORDER BY o.order_date DESC, o.order_time DESC""", (vid, d0, d1))
         orders = [{"id": r[0], "date": str(r[1]), "time": r[2], "customer_code": r[3],
-                   "customer": fa_text(r[4]) or r[3], "total": float(r[5] or 0), "items": r[6]}
-                  for r in cur.fetchall()]
+                   "customer": fa_text(r[4]) or r[3], "total": float(r[5] or 0), "description": r[6],
+                   "lines": []} for r in cur.fetchall()]
+        by_id = {o["id"]: o for o in orders}
+        if orders:
+            cur.execute(f"""
+                SELECT oi.order_id, oi.article_code, CAST(a.A_Name AS NVARCHAR(200)),
+                       CAST(oi.quantity AS FLOAT), CAST(oi.price AS FLOAT)
+                FROM order_items oi JOIN orders o ON o.id = oi.order_id
+                LEFT JOIN {art} a ON a.A_Code = oi.article_code
+                WHERE o.visitor_id=? AND o.order_date BETWEEN ? AND ?
+                ORDER BY oi.order_id, oi.id""", (vid, d0, d1))
+            for r in cur.fetchall():
+                if r[0] in by_id:
+                    by_id[r[0]]["lines"].append({"code": r[1], "name": fa_text(r[2]) or r[1],
+                                                 "qty": float(r[3] or 0), "price": float(r[4] or 0)})
+        for o in orders:
+            o["items"] = len(o["lines"])
         cur.execute(f"""
-            SELECT p.payment_date, CONVERT(VARCHAR(5), p.payment_time, 108), p.customer_code,
-                   CAST(c.C_Name AS NVARCHAR(200)), p.payment_type, p.amount
+            SELECT p.id, p.payment_date, CONVERT(VARCHAR(5), p.payment_time, 108), p.customer_code,
+                   CAST(c.C_Name AS NVARCHAR(200)), p.payment_type, p.amount,
+                   ISNULL(p.check_number,''), ISNULL(p.check_sayyadi,''), p.check_due_date,
+                   ISNULL(p.check_image_path,''), ISNULL(p.transfer_account,''),
+                   ISNULL(p.transfer_tracking,''), ISNULL(p.transfer_image_path,''),
+                   ISNULL(p.tracking_number,''), ISNULL(p.description,'')
             FROM payments p LEFT JOIN {cust} c ON c.C_Code = p.customer_code
             WHERE p.visitor_id=? AND p.payment_date BETWEEN ? AND ?
             ORDER BY p.payment_date DESC, p.payment_time DESC""", (vid, d0, d1))
-        pays = [{"date": str(r[0]), "time": r[1], "customer_code": r[2],
-                 "customer": fa_text(r[3]) or r[2], "type": r[4], "amount": float(r[5] or 0)}
+        pays = [{"id": r[0], "date": str(r[1]), "time": r[2], "customer_code": r[3],
+                 "customer": fa_text(r[4]) or r[3], "type": r[5], "amount": float(r[6] or 0),
+                 "check_number": r[7], "check_sayyadi": r[8], "check_due": str(r[9] or ''),
+                 "image": r[10] or r[13], "account": r[11], "tracking": r[12] or r[14],
+                 "description": r[15]}
                 for r in cur.fetchall()]
         cur.close(); conn.close()
+        log('report', f"{d0} تا {d1}")
         return jsonify({"status":"success", "from": str(d0), "to": str(d1),
                         "visits": visits, "orders": orders, "payments": pays}), 200
     except Exception as e:
@@ -374,19 +398,83 @@ def my_report():
         return jsonify({"status":"error","message":"دریافت گزارش از سرور ممکن نشد"}), 500
 
 
+@app.route('/api/my-image', methods=['GET'])
+@require_auth
+def my_image():
+    """عکس سلفی / چک / حواله ثبت‌شده توسط همین ویزیتور (کوچک‌شده، به شکل data URL)
+    — از طریق API تا داخل اپ اندروید هم بدون محدودیت مرورگر نمایش داده شود"""
+    vid = request.current_user['visitor_id']
+    rel = (request.args.get('path') or '').strip()
+    if not rel.startswith('/static/'):
+        return jsonify({"status": "error", "message": "مسیر نامعتبر است"}), 400
+    try:
+        conn = get_conn(); cur = conn.cursor()
+        cur.execute("""SELECT 1 WHERE EXISTS (SELECT 1 FROM visits WHERE visitor_id=? AND selfie_path=?)
+                          OR EXISTS (SELECT 1 FROM payments WHERE visitor_id=?
+                                     AND (check_image_path=? OR transfer_image_path=?))""",
+                    (vid, rel, vid, rel, rel))
+        allowed = cur.fetchone() is not None
+        cur.close(); conn.close()
+    except Exception as e:
+        print(f"❌ my-image error: {e}")
+        return jsonify({"status": "error", "message": "خطای سرور"}), 500
+    root = os.path.realpath(paths.STATIC_DIR)
+    fpath = os.path.realpath(os.path.join(paths.DATA_DIR, rel.lstrip('/')))
+    if not allowed or not fpath.startswith(root + os.sep) or not os.path.isfile(fpath):
+        return jsonify({"status": "error", "message": "عکس پیدا نشد"}), 404
+    try:
+        from PIL import Image
+        import io
+        with Image.open(fpath) as im:
+            im = im.convert("RGB")
+            im.thumbnail((1100, 1100))
+            buf = io.BytesIO()
+            im.save(buf, "JPEG", quality=80)
+        data = base64.b64encode(buf.getvalue()).decode('ascii')
+    except Exception:
+        with open(fpath, 'rb') as f:
+            data = base64.b64encode(f.read()).decode('ascii')
+    return jsonify({"status": "success", "data": "data:image/jpeg;base64," + data}), 200
+
+
 # ══════════════════════════════════════════
 # ۲-ج. پیام‌ها — مدیر ↔ ویزیتور و ویزیتورها با هم
 # ══════════════════════════════════════════
+def _me_row(me):
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute("SELECT ISNULL(role,'visitor'), app_settings FROM visitors WHERE id=?", (me,))
+    r = cur.fetchone(); cur.close(); conn.close()
+    return (r[0], r[1]) if r else ('visitor', None)
+
+
+def peer_allowed(me) -> bool:
+    """آیا این کاربر ویزیتورهای دیگر را در پیام‌ها می‌بیند؟ (مدیر همیشه)"""
+    role, raw = _me_row(me)
+    return role == 'admin' or bool(effective_rules(raw).get('PEER_MESSAGES', True))
+
+
+def message_contacts(me):
+    """کاربرانی که این کاربر می‌تواند به آن‌ها پیام بدهد"""
+    peer = peer_allowed(me)
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute(f"""SELECT id, full_name, ISNULL(role,'visitor') FROM visitors
+                    WHERE is_active=1 AND id<>? {'' if peer else "AND role='admin'"}
+                    ORDER BY CASE WHEN role='admin' THEN 0 ELSE 1 END, full_name""", (me,))
+    rows = [{"id": int(r[0]), "name": r[1], "role": r[2]} for r in cur.fetchall()]
+    cur.close(); conn.close()
+    return rows
+
+
 @app.route('/api/contacts', methods=['GET'])
 @require_auth
 def contacts():
     me = request.current_user['visitor_id']
-    conn = get_conn(); cur = conn.cursor()
-    cur.execute("""SELECT id, full_name, ISNULL(role,'visitor') FROM visitors
-                   WHERE is_active=1 AND id<>? ORDER BY CASE WHEN role='admin' THEN 0 ELSE 1 END, full_name""", (me,))
-    rows = [{"id": r[0], "name": r[1], "role": r[2]} for r in cur.fetchall()]
-    cur.close(); conn.close()
-    return jsonify({"status": "success", "contacts": rows}), 200
+    try:
+        rows = message_contacts(me)
+    except Exception as e:
+        print(f"❌ contacts error: {e}")
+        return jsonify({"status": "error", "message": "دریافت لیست کاربران ممکن نشد"}), 500
+    return jsonify({"status": "success", "contacts": rows, "peer": peer_allowed(me)}), 200
 
 
 @app.route('/api/messages', methods=['GET'])
@@ -418,16 +506,19 @@ def messages_send():
     to = data.get('to')
     if not body:
         return jsonify({"status": "error", "message": "متن پیام خالی است"}), 400
-    conn = get_conn(); cur = conn.cursor()
+    allowed = {c["id"] for c in message_contacts(me)}
     if to == 'all':
-        cur.execute("SELECT id FROM visitors WHERE is_active=1 AND id<>?", (me,))
-        targets = [r[0] for r in cur.fetchall()]
+        if _me_row(me)[0] != 'admin':
+            return jsonify({"status": "error", "message": "پیام همگانی فقط برای مدیر مجاز است"}), 403
+        targets = sorted(allowed)
     else:
         try:
             targets = [int(to)]
         except (TypeError, ValueError):
-            cur.close(); conn.close()
             return jsonify({"status": "error", "message": "گیرندهٔ پیام مشخص نیست"}), 400
+        if targets[0] not in allowed:
+            return jsonify({"status": "error", "message": "ارسال پیام به این کاربر مجاز نیست"}), 403
+    conn = get_conn(); cur = conn.cursor()
     for t in targets:
         cur.execute("INSERT INTO messages (sender_id, recipient_id, body) VALUES (?,?,?)", (me, t, body))
     conn.commit(); cur.close(); conn.close()

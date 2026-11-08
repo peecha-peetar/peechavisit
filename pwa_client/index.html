@@ -131,7 +131,7 @@
         </select>
 
         <label class="field-label" for="pay-amount">مبلغ (ریال)</label>
-        <input type="number" id="pay-amount" inputmode="numeric" placeholder="مبلغ به ریال">
+        <input type="text" id="pay-amount" class="money-input" inputmode="numeric" autocomplete="off" placeholder="مبلغ به ریال">
 
         <!-- نقدی -->
         <div class="pay-section active" id="cash-section"></div>
@@ -227,6 +227,7 @@
             <button type="button" class="menu-btn active" data-r="today" onclick="setRepRange('today')">امروز</button>
             <button type="button" class="menu-btn" data-r="week" onclick="setRepRange('week')">۷ روز اخیر</button>
             <button type="button" class="menu-btn" data-r="month" onclick="setRepRange('month')">این ماه</button>
+            <button type="button" class="menu-btn" data-r="q3" onclick="setRepRange('q3')">۳ ماه</button>
         </nav>
         <div class="rep-kpis" id="rep-kpis"></div>
 
@@ -252,6 +253,18 @@
         <div class="hint" id="rep-stamp" style="text-align:center;padding-bottom:16px"></div>
     </main>
 </div>
+
+<!-- ── جزئیات یک ثبت در گزارش (اقلام سفارش، جزئیات دریافت، عکس‌ها) ── -->
+<div class="pv-sheet-wrap" id="rep-detail" hidden onclick="if(event.target===this)closeRepDetail()">
+    <div class="pv-sheet">
+        <div class="pv-sheet-head">
+            <div id="rep-detail-title"></div>
+            <button type="button" class="icon-btn dark" onclick="closeRepDetail()">بستن</button>
+        </div>
+        <div class="pv-sheet-body" id="rep-detail-body"></div>
+    </div>
+</div>
+<div class="pv-img-full" id="img-full" hidden onclick="this.hidden=true"><img alt=""></div>
 
 <!-- ── پیام‌ها ── -->
 <div class="report-view" id="msg-view" hidden>

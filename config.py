@@ -38,7 +38,7 @@ DATABASES = {
 APP = {
     "NAME":          "پیچا ویزیت",
     "NAME_EN":       "PeechaVisit",
-    "VERSION":       "3.0",
+    "VERSION":       "3.1",
     "WEBSITE":       "https://peecha.ir",
     "PRIMARY_COLOR": "#020025",
     "ACCENT_COLOR":  "#4f6ef7",
@@ -70,6 +70,7 @@ MOBILE = {
     "SHOW_STOCK":     True,    # موجودی کالا در اپ نمایش داده شود
     "ONLY_IN_STOCK":  False,   # فقط کالاهای دارای موجودی در لیست بیایند
     "ALLOW_OVERSELL": False,   # سفارش بیشتر از موجودی مجاز باشد
+    "PEER_MESSAGES":  True,    # ویزیتورها همدیگر را در پیام‌ها ببینند (خاموش = فقط مدیران)
 }
 
 # ── GPS ──
