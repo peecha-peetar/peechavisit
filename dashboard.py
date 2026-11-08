@@ -1,6 +1,7 @@
-# dashboard.py - پیچا ویزیت | داشبورد v8
+# dashboard.py - پیچا ویزیت | داشبورد v9
 # ════════════════════════════════════════════════
 # اجرا:  streamlit run dashboard.py --server.port 8501
+# صفحه‌ها: نقشه و لیست · گزارش‌ساز · پیام‌ها · لاگ ورود
 # هر «توقف» روی نقشه = یک ویزیت (+ سفارش و دریافتی که همان لحظه ثبت شده)
 # ════════════════════════════════════════════════
 import base64
@@ -22,11 +23,11 @@ from streamlit_folium import st_folium
 st.set_page_config(page_title="داشبورد | پیچا ویزیت", page_icon="📍",
                    layout="wide", initial_sidebar_state="collapsed")
 
-from config import APP
 from db import get_conn, SALES_DB
 from panel_auth import require_dashboard, logout
 from ui_font import font_css
 from ui_theme import theme_css, app_bar
+import audit
 import report
 
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
@@ -35,39 +36,54 @@ MONTHS = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرد�
           "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"]
 SALES = f"[{SALES_DB}].dbo" if re.fullmatch(r"[A-Za-z0-9_]+", SALES_DB) else "dbo"
 
-# رنگ نشانگر بر اساس محتوای توقف
+# رنگ‌ها: یک رنگ ثابت برای هر نوع، همه‌جا (نقشه، اعلان، جزئیات)
+KIND_COLOR = {"visit": "#3b5bdb", "order": "#7c3aed", "pay": "#12805c"}
+KIND_SOFT = {"visit": "#edf1ff", "order": "#f3edff", "pay": "#e6f6ef"}
 STOP_COLORS = {
     "visit": ("#3b5bdb", "فقط ویزیت"),
     "order": ("#7c3aed", "ویزیت + سفارش"),
     "pay":   ("#12805c", "ویزیت + دریافت"),
     "both":  ("#e8590c", "سفارش + دریافت"),
 }
-KIND_COLOR = {"visit": "#3b5bdb", "order": "#7c3aed", "pay": "#12805c"}
-ROUTE_COLORS = ["#3b5bdb", "#e8590c", "#2b8a3e", "#c2255c", "#1098ad", "#7048e8", "#f08c00", "#495057"]
+ROUTE_COLORS = ["#4c6ef5", "#f76707", "#37b24d", "#d6336c", "#1098ad", "#7048e8", "#f59f00", "#868e96"]
+PAGES = ["🗺️ نقشه و لیست", "📊 گزارش‌ساز", "💬 پیام‌ها", "📜 لاگ ورود"]
 
 st.markdown(font_css() + "\n" + theme_css(), unsafe_allow_html=True)
 st.markdown("""
 <style>
 [data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"], [data-testid="collapsedControl"] { display:none !important; }
-/* وقتی پنجره‌ای باز است، منو رویش نماند */
+/* هنگام بروزرسانی صفحه کم‌رنگ و چشمک‌زن نشود */
+[data-stale="true"], .stale-element, [data-testid="stElementContainer"][data-stale] { opacity:1 !important; transition:none !important; }
+/* iframeهای اسکریپت (ارتفاع صفر) جا نگیرند */
+[data-testid="stElementContainer"]:has(iframe[height="0"]) { display:none; }
 body:has([data-testid="stDialog"]) [data-testid="stPopoverBody"] { display:none !important; }
-/* ردیف فیلترها فشرده */
-.st-key-filters [data-testid="stHorizontalBlock"] { gap:8px !important; align-items:center; }
-.legend { display:flex; flex-wrap:wrap; gap:6px; margin:0 0 6px; font-size:12px; }
+.st-key-filters [data-testid="stHorizontalBlock"], .st-key-pager [data-testid="stHorizontalBlock"] { gap:8px !important; align-items:center; }
+.legend { display:flex; flex-wrap:wrap; gap:6px; margin:0 0 6px; font-size:12px; min-height:26px; }
 .legend span { display:inline-flex; align-items:center; gap:5px; background:#fff; border:1px solid #e3e7ef;
                border-radius:20px; padding:2px 10px; }
-.legend i { width:10px; height:10px; border-radius:50%; display:inline-block; }
+.legend i { width:10px; height:10px; border-radius:50%; display:inline-block; box-shadow:0 0 0 3px rgba(0,0,0,.04); }
 .legend .r { border-radius:2px; height:3px; width:14px; }
-.hint { font-size:12px; color:#6b7686; margin:2px 0 6px; }
-/* روز/ماه/سال کنار هم */
+.hint { font-size:12px; color:#6b7686; margin:2px 0 6px; min-height:18px; }
 [class*="st-key-jp_"] [data-testid="stHorizontalBlock"] { flex-wrap:nowrap !important; gap:6px !important; }
 [class*="st-key-jp_"] [data-testid="stColumn"] { min-width:0 !important; width:auto !important; flex:1 1 0 !important; }
-/* پنجرهٔ جزئیات */
-.dlg-kind { display:inline-block; border-radius:20px; padding:2px 12px; font-size:12px; font-weight:700; }
-.dlg-head { font-size:20px; font-weight:800; color:#17202e; margin-top:6px; }
-.dlg-amount { font-size:22px; font-weight:800; margin:2px 0; }
-.dlg-meta { font-size:13px; color:#6b7686; margin:2px 0 10px; }
-.sec { font-size:15px; font-weight:800; margin:6px 0 8px; }
+
+/* ── پنجرهٔ جزئیات ── */
+.dh { border-radius:14px; padding:14px 16px; margin-bottom:12px; display:flex; gap:16px; align-items:center; }
+.dh .time { text-align:center; min-width:96px; padding-left:16px; border-left:1px solid rgba(0,0,0,.08); }
+.dh .time b { display:block; font-size:30px; font-weight:900; line-height:1.1; letter-spacing:.5px; }
+.dh .time small { font-size:12px; color:#495057; }
+.dh .who { flex:1; min-width:0; }
+.dh .kind { display:inline-block; border-radius:20px; padding:2px 12px; font-size:12px; font-weight:800; color:#fff; }
+.dh .name { font-size:20px; font-weight:800; color:#17202e; margin:4px 0 2px; }
+.dh .amount { font-size:20px; font-weight:900; }
+.chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+.chips span { background:rgba(255,255,255,.75); border:1px solid rgba(0,0,0,.06); border-radius:20px;
+              padding:2px 10px; font-size:12px; color:#343a40; }
+.note { background:#fff8e6; border:1px solid #ffe3a3; border-radius:12px; padding:10px 14px; margin-bottom:10px;
+        font-size:14px; line-height:1.9; }
+.note b { color:#9a6700; }
+.sec { font-size:15px; font-weight:800; margin:2px 0 8px; display:flex; align-items:center; gap:6px; }
+.sec i { width:8px; height:8px; border-radius:50%; display:inline-block; }
 .box { background:#fff; border:1px solid #e3e7ef; border-radius:12px; padding:12px 14px; margin-bottom:10px; }
 .muted { color:#868e96; font-size:13px; }
 .kv { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:8px; }
@@ -78,39 +94,67 @@ body:has([data-testid="stDialog"]) [data-testid="stPopoverBody"] { display:none 
 .itm th { text-align:right; color:#6b7686; font-weight:600; border-bottom:1px solid #e3e7ef; padding:5px 4px; }
 .itm td { border-bottom:1px solid #f1f3f5; padding:6px 4px; }
 .itm tfoot td { font-weight:800; border-bottom:0; }
-/* گالری بند انگشتی + بزرگ‌نمایی با کلیک */
-.gal { display:flex; flex-wrap:wrap; gap:10px; margin:4px 0 12px; }
+.gal { display:flex; flex-wrap:wrap; gap:10px; margin:0 0 12px; }
 .gal figure { margin:0; width:132px; }
-.gal .th img { width:132px; height:96px; object-fit:cover; border-radius:10px; border:1px solid #dfe3ea; cursor:zoom-in; display:block; }
+.gal .th img { width:132px; height:96px; object-fit:cover; border-radius:10px; border:1px solid #dfe3ea; cursor:zoom-in;
+               display:block; transition:transform .15s ease, box-shadow .15s ease; }
+.gal .th img:hover { transform:translateY(-2px); box-shadow:0 6px 16px rgba(16,24,40,.16); }
 .gal figcaption { font-size:12px; color:#6b7686; text-align:center; margin-top:3px; }
 .gal .lbt { display:none; }
 .gal .lb { display:none; position:fixed; inset:0; z-index:100000; background:rgba(10,12,20,.88);
            align-items:center; justify-content:center; flex-direction:column; }
-.gal .lbt:checked ~ .lb { display:flex; }
+.gal .lbt:checked ~ .lb { display:flex; animation:fadeIn .2s ease; }
 .gal .lb img { max-width:92vw; max-height:84vh; border-radius:8px; cursor:zoom-out; }
 .gal .lb span { color:#fff; margin-top:8px; font-size:14px; }
 .gal .nophoto { width:132px; height:96px; border-radius:10px; border:1px dashed #ced4da; color:#adb5bd;
                 display:flex; align-items:center; justify-content:center; font-size:12px; text-align:center; padding:4px; }
-/* اعلان‌ها */
-.pv-notes { position:fixed; left:16px; bottom:16px; z-index:99999; display:flex; flex-direction:column-reverse;
-            gap:8px; width:330px; direction:rtl; pointer-events:none; }
-.pv-note { background:#fff; border:1px solid #dfe3ea; border-right:5px solid var(--c); border-radius:12px;
-           box-shadow:0 10px 30px rgba(16,24,40,.18); padding:10px 12px; display:flex; gap:10px; align-items:center;
-           animation:pvIn .35s ease, pvOut .6s ease 19.4s forwards; pointer-events:auto; }
-.pv-note img { width:54px; height:54px; border-radius:10px; object-fit:cover; flex-shrink:0; }
-.pv-note .i { font-size:26px; width:54px; text-align:center; flex-shrink:0; }
-.pv-note .t { font-weight:800; font-size:14px; color:var(--c); }
+@keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
+
+/* ── اعلان‌ها (لایهٔ ثابت؛ صفحه را جابه‌جا نمی‌کند) ── */
+.st-key-pvnotes { position:fixed !important; left:16px; bottom:16px; z-index:99999; width:340px; gap:8px !important; }
+.st-key-pvnotes [data-testid="stElementContainer"] { margin:0 !important; }
+[class*="st-key-note_"] { background:#fff; border:1px solid #e3e7ef; border-radius:14px; padding:10px 12px !important;
+    box-shadow:0 12px 32px rgba(16,24,40,.16); animation:noteIn .35s ease; gap:8px !important; }
+[class*="st-key-note_"] > div { gap:8px !important; }
+[class*="st-key-note_"] .stButton { width:100%; }
+[class*="st-key-note_"] .stButton > button { width:100%; min-height:32px !important; padding:2px 10px !important; font-size:12px !important;
+    background:#f8f9fb !important; }
+.pv-note { display:flex; gap:10px; align-items:center; direction:rtl; padding-bottom:18px; }
+.pv-note img { width:52px; height:52px; border-radius:10px; object-fit:cover; flex-shrink:0; }
+.pv-note .i { width:52px; height:52px; border-radius:10px; display:flex; align-items:center; justify-content:center;
+              font-size:24px; flex-shrink:0; }
+.pv-note .t { font-weight:800; font-size:13px; }
 .pv-note .n { font-weight:700; font-size:14px; color:#17202e; }
 .pv-note .m { font-size:12px; color:#6b7686; }
-@keyframes pvIn { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:none; } }
-@keyframes pvOut { to { opacity:0; transform:translateY(8px); visibility:hidden; } }
+@keyframes noteIn { from { opacity:0; transform:translateY(14px) scale(.98); } to { opacity:1; transform:none; } }
+
+/* ── پیام‌ها ── */
+.chat { background:#fff; border:1px solid #e3e7ef; border-radius:14px; padding:12px; height:470px; overflow-y:auto;
+        display:flex; flex-direction:column; gap:6px; }
+.bub { max-width:75%; padding:8px 12px; border-radius:14px; font-size:14px; line-height:1.8; white-space:pre-wrap; }
+.bub.me { align-self:flex-start; background:#3b5bdb; color:#fff; border-bottom-right-radius:4px; }
+.bub.them { align-self:flex-end; background:#f1f3f5; border-bottom-left-radius:4px; }
+.bub small { display:block; font-size:11px; opacity:.7; }
 </style>
 """, unsafe_allow_html=True)
 
 USER = require_dashboard("داشبورد پیچا ویزیت", "📍")
 PERM = USER["perms"]
 SHOW_MONEY, SHOW_PHOTOS, CAN_EXPORT = PERM["money"], PERM["photos"], PERM["export"]
+IS_ADMIN = USER.get("role") == "admin"
 ALLOWED = tuple(PERM["visitors"]) or None          # None = همهٔ ویزیتورها
+
+
+@st.cache_resource
+def _schema_ready():
+    try:
+        audit.ensure_schema()
+    except Exception as e:
+        print(f"⚠️ ensure_schema: {e}")
+    return True
+
+
+_schema_ready()
 
 
 # ══════════════════════════════════════════════
@@ -143,12 +187,24 @@ def jdate(d) -> str:
         return fa(str(d)[:10])
 
 
+def jweekday(d) -> str:
+    try:
+        return ["شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه"][
+            jdatetime.date.fromgregorian(date=pd.Timestamp(d).date()).weekday()]
+    except Exception:
+        return ""
+
+
 def hhmm(t) -> str:
     return fa(str(t or "")[:5]) or "—"
 
 
 def esc(s) -> str:
-    return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return str(s if s is not None else "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def txt(v) -> str:
+    return "" if v is None or (isinstance(v, float) and pd.isna(v)) else str(v).strip()
 
 
 def img_file(rel) -> str | None:
@@ -208,10 +264,28 @@ def read_sql(sql, params=()):
         conn.close()
 
 
+def run_sql(sql, params=()):
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute(sql, params); conn.commit()
+    finally:
+        cur.close(); conn.close()
+
+
 def stop_kind(s) -> str:
     if s["orders"] and s["pays"]:
         return "both"
     return "order" if s["orders"] else "pay" if s["pays"] else "visit"
+
+
+def stabilize(el, n=None):
+    """شناسه‌های ثابت برای اجزای نقشه: HTML یکسان → نقشه دوباره ساخته نمی‌شود (بدون چشمک)"""
+    n = n if n is not None else [0]
+    el._id = f"pv{n[0]}"
+    n[0] += 1
+    for ch in list(getattr(el, "_children", {}).values()):
+        stabilize(ch, n)
+    return el
 
 
 # ══════════════════════════════════════════════
@@ -219,7 +293,8 @@ def stop_kind(s) -> str:
 # ══════════════════════════════════════════════
 @st.cache_data(ttl=60, show_spinner=False)
 def load_visitors():
-    return read_sql("SELECT id, full_name, ISNULL(is_active,1) AS active FROM visitors ORDER BY full_name")
+    return read_sql("SELECT id, full_name, ISNULL(role,'visitor') AS role, ISNULL(is_active,1) AS active "
+                    "FROM visitors ORDER BY full_name")
 
 
 def _vis_filter(alias, vids):
@@ -233,16 +308,11 @@ def load_data(g0: str, g1: str, vids: tuple | None):
     def q(sql, alias):
         f, p = _vis_filter(alias, vids)
         return read_sql(sql.replace("{VF}", f), (g0, g1) + p)
-    try:
-        acc_col = "v.gps_accuracy"
-        read_sql("SELECT TOP 0 gps_accuracy FROM visits")
-    except Exception:
-        acc_col = "NULL"
     visits = q(f"""
         SELECT v.id, v.visitor_id, ISNULL(u.full_name, N'نامشخص') AS visitor,
                v.customer_code, ISNULL(CAST(c.C_Name AS NVARCHAR(200)), v.customer_code) AS customer,
                v.visit_date AS d, CONVERT(VARCHAR(8), v.visit_time, 108) AS t,
-               v.latitude AS lat, v.longitude AS lng, {acc_col} AS acc,
+               v.latitude AS lat, v.longitude AS lng, v.gps_accuracy AS acc, v.device,
                ISNULL(v.selfie_path,'') AS selfie, ISNULL(v.description,'') AS descr
         FROM visits v
         LEFT JOIN visitors u ON u.id = v.visitor_id
@@ -253,7 +323,8 @@ def load_data(g0: str, g1: str, vids: tuple | None):
         SELECT o.id, o.visitor_id, ISNULL(u.full_name, N'نامشخص') AS visitor,
                o.customer_code, ISNULL(CAST(c.C_Name AS NVARCHAR(200)), o.customer_code) AS customer,
                o.order_date AS d, CONVERT(VARCHAR(8), o.order_time, 108) AS t,
-               o.latitude AS lat, o.longitude AS lng, o.total_amount AS total
+               o.latitude AS lat, o.longitude AS lng, o.total_amount AS total,
+               ISNULL(o.description,'') AS descr, o.device
         FROM orders o
         LEFT JOIN visitors u ON u.id = o.visitor_id
         LEFT JOIN {SALES}.customer c ON c.C_Code = o.customer_code
@@ -267,7 +338,8 @@ def load_data(g0: str, g1: str, vids: tuple | None):
                ISNULL(p.check_number,'') AS check_number, ISNULL(p.check_sayyadi,'') AS check_sayyadi,
                p.check_due_date AS check_due, ISNULL(p.check_image_path,'') AS check_img,
                ISNULL(p.transfer_account,'') AS tr_account, ISNULL(p.transfer_tracking,'') AS tr_tracking,
-               ISNULL(p.transfer_image_path,'') AS tr_img, ISNULL(p.tracking_number,'') AS tracking
+               ISNULL(p.transfer_image_path,'') AS tr_img, ISNULL(p.tracking_number,'') AS tracking,
+               ISNULL(p.description,'') AS descr, p.device
         FROM payments p
         LEFT JOIN visitors u ON u.id = p.visitor_id
         LEFT JOIN {SALES}.customer c ON c.C_Code = p.customer_code
@@ -306,7 +378,7 @@ def build_stops(visits, orders, pays):
 
 
 # ══════════════════════════════════════════════
-# نوار بالا و فیلترها (یک ردیف)
+# تاریخ‌ها
 # ══════════════════════════════════════════════
 today_j = jdatetime.date.today()
 today_g = today_j.togregorian()
@@ -346,177 +418,66 @@ def jalali_picker(prefix, default_j):
             continue
 
 
+def range_text(j0, j1, g0, g1):
+    return (fa(j0.strftime('%Y/%m/%d')) if g0 == g1
+            else f"از {fa(j0.strftime('%Y/%m/%d'))} تا {fa(j1.strftime('%Y/%m/%d'))}")
+
+
 vis_df = load_visitors()
 if ALLOWED:
     vis_df = vis_df[vis_df["id"].isin(ALLOWED)]
 vis_opts = {"همهٔ ویزیتورها": None}
 vis_opts.update({(r["full_name"] + ("" if r["active"] else " (غیرفعال)")): int(r["id"]) for _, r in vis_df.iterrows()})
 
-bar = st.empty()          # نوار بالا بعد از محاسبهٔ جمع‌ها پر می‌شود
-fbox = st.container(key="filters")
-f_menu, f_vis, f_per, f_date, f_cust, f_prod, f_ref = fbox.columns([0.75, 1.5, 1.25, 1.45, 2, 2, 0.75])
 
-sel_vname = f_vis.selectbox("ویزیتور", list(vis_opts), label_visibility="collapsed")
-sel_vid = vis_opts[sel_vname]
-period = f_per.selectbox("بازه", PERIODS, index=4, label_visibility="collapsed")
-if period == "بازه دلخواه":
-    with f_date.popover(st.session_state.get("range_lbl", "📅 انتخاب بازه"), use_container_width=True):
-        st.caption("از تاریخ")
-        j0 = jalali_picker("from", jdatetime.date(today_j.year, today_j.month, 1))
-        st.caption("تا تاریخ")
-        j1 = jalali_picker("to", today_j)
-    if j1 < j0:
-        j0, j1 = j1, j0
-    g0, g1 = j0.togregorian(), j1.togregorian()
-    lbl = f"📅 {fa(j0.strftime('%m/%d'))} تا {fa(j1.strftime('%m/%d'))}"
-    if st.session_state.get("range_lbl") != lbl:
-        st.session_state["range_lbl"] = lbl
-        st.rerun()
-else:
-    g0, g1 = period_range(period)
-    j0, j1 = jdatetime.date.fromgregorian(date=g0), jdatetime.date.fromgregorian(date=g1)
-    f_date.markdown(f"<div class='hint' style='text-align:center'>{fa(j0.strftime('%Y/%m/%d'))}"
-                    f"{'' if g0 == g1 else ' تا ' + fa(j1.strftime('%m/%d'))}</div>", unsafe_allow_html=True)
-if f_ref.button("🔄", use_container_width=True, help="بروزرسانی"):
+# ══════════════════════════════════════════════
+# اعلان روی کلیک: رفتن به همان ثبت روی نقشه و باز کردن جزئیات
+# ══════════════════════════════════════════════
+def _current_range():
+    ss = st.session_state
+    per = ss.get("f_period", "این ماه")
+    if per != "بازه دلخواه":
+        return period_range(per)
+    try:
+        return (jdatetime.date(ss["from_y"], ss["from_m"], ss["from_d"]).togregorian(),
+                jdatetime.date(ss["to_y"], ss["to_m"], ss["to_d"]).togregorian())
+    except Exception:
+        return None, None
+
+
+def open_note(table, rec_id, rec_date):
+    ss = st.session_state
+    ss["page"] = PAGES[0]
+    ss["f_vis"], ss["f_cust"], ss["f_prod"] = "همهٔ ویزیتورها", [], []
+    d = pd.Timestamp(rec_date).date() if rec_date else today_g
+    g0, g1 = _current_range()
+    if not (g0 and g0 <= d <= g1):          # بازه را طوری عوض کن که همان ثبت دیده شود
+        if d == today_g:
+            ss["f_period"] = "امروز"
+        else:
+            jd = jdatetime.date.fromgregorian(date=d)
+            ss["f_period"] = "بازه دلخواه"
+            for p in ("from", "to"):
+                ss[f"{p}_y"], ss[f"{p}_m"], ss[f"{p}_d"] = jd.year, jd.month, jd.day
+    ss["pending_open"] = (table, int(rec_id))
+    ss.notes = [n for n in ss.get("notes", []) if not (n["t"] == table and n["id"] == rec_id)]
     load_data.clear()
-    st.rerun()
-
-vids = (sel_vid,) if sel_vid else ALLOWED
-try:
-    visits, orders, pays, items = load_data(g0.isoformat(), g1.isoformat(), vids)
-except Exception as e:
-    st.error(f"❌ خطای دیتابیس: {e}")
-    st.stop()
-all_stops = build_stops(visits, orders, pays)
-
-# ── فیلتر مشتری و کالا (گزینه‌ها از داده‌های همین بازه) ──
-cust_names = {}
-for s in all_stops:
-    cust_names.setdefault(str(s["customer_code"]), s["customer"])
-prod_names = dict(zip(items["code"].astype(str), items["name"])) if len(items) else {}
-sel_cust = f_cust.multiselect("مشتری", sorted(cust_names, key=lambda c: cust_names[c]), label_visibility="collapsed",
-                              format_func=lambda c: f"{cust_names[c]} ({fa(c)})", placeholder="🔍 همهٔ مشتریان")
-sel_prod = f_prod.multiselect("کالا", sorted(prod_names, key=lambda c: prod_names[c]), label_visibility="collapsed",
-                              format_func=lambda c: f"{prod_names[c]} ({fa(c)})", placeholder="🔍 همهٔ کالاها")
-
-items_by_order = {}
-for it in items.to_dict("records"):
-    items_by_order.setdefault(int(it["order_id"]), []).append(it)
-
-stops = []
-for s in all_stops:
-    if sel_cust and str(s["customer_code"]) not in sel_cust:
-        continue
-    if sel_prod:
-        ords = [o for o in s["orders"]
-                if any(str(i["code"]) in sel_prod for i in items_by_order.get(int(o["id"]), []))]
-        if not ords:
-            continue
-        s = {**s, "orders": ords}
-    stops.append(s)
-for i, s in enumerate(stops, 1):
-    s["n"] = i
-    s["ck"] = stop_kind(s)
-stop_by_n = {s["n"]: s for s in stops}
-
-f_visits = [s for s in stops if s["visit"] is not None]
-f_orders = [(s, o) for s in stops for o in s["orders"]]
-f_pays = [(s, p) for s in stops for p in s["pays"]]
-order_sum = sum(float(o["total"] or 0) for _, o in f_orders)
-pay_sum = sum(float(p["amount"] or 0) for _, p in f_pays)
-
-prod_sum = {}
-for _, o in f_orders:
-    for it in items_by_order.get(int(o["id"]), []):
-        if sel_prod and str(it["code"]) not in sel_prod:
-            continue
-        r = prod_sum.setdefault(str(it["code"]), {"name": it["name"], "qty": 0.0, "amount": 0.0, "orders": set()})
-        r["qty"] += float(it["qty"] or 0)
-        r["amount"] += float(it["qty"] or 0) * float(it["price"] or 0)
-        r["orders"].add(int(o["id"]))
-
-range_txt = (f"{fa(j0.strftime('%Y/%m/%d'))}" if g0 == g1
-             else f"از {fa(j0.strftime('%Y/%m/%d'))} تا {fa(j1.strftime('%Y/%m/%d'))}")
-amt = lambda v: f" · {money(v)}" if SHOW_MONEY else ""
-bar.markdown(app_bar("📍 داشبورد پیچا ویزیت", f"{range_txt} · {esc(sel_vname)}", [
-    f"<b>{fa(len(f_visits))}</b> ویزیت",
-    f"<b>{fa(len({s['customer_code'] for s in stops}))}</b> مشتری",
-    f"<b>{fa(len(f_orders))}</b> سفارش{amt(order_sum)}",
-    f"<b>{fa(len(f_pays))}</b> دریافت{amt(pay_sum)}",
-    f"👤 {esc(USER['name'])}",
-]), unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════
-# گزارش: Excel / PDF / چاپ  (همه از نتیجهٔ فیلترشده)
+# نوار بالا و انتخاب صفحه
 # ══════════════════════════════════════════════
-def report_data():
-    meta = [("بازه", range_txt), ("ویزیتور", sel_vname)]
-    if sel_cust:
-        meta.append(("مشتری", "، ".join(cust_names[c] for c in sel_cust)))
-    if sel_prod:
-        meta.append(("کالا", "، ".join(prod_names[c] for c in sel_prod)))
-    meta.append(("جمع", f"{fa(len(f_visits))} ویزیت · {fa(len(f_orders))} سفارش{amt(order_sum)} · "
-                       f"{fa(len(f_pays))} دریافت{amt(pay_sum)}"))
-    money_col = (lambda d, k, v: d.update({k: v}) or d) if SHOW_MONEY else (lambda d, k, v: d)
-    sec_v = [{"#": s["n"], "تاریخ": jdate(s["d"]), "ساعت": str(s["t"])[:5], "مشتری": s["customer"],
-              "ویزیتور": s["visitor"],
-              "ثبت‌ها": " + ".join(x for x in ["سفارش" if s["orders"] else "", "دریافت" if s["pays"] else ""] if x),
-              "توضیحات": s["visit"]["descr"]} for s in f_visits]
-    sec_o = [money_col({"شماره": int(o["id"]), "تاریخ": jdate(o["d"]), "ساعت": str(o["t"])[:5], "مشتری": s["customer"],
-                        "ویزیتور": s["visitor"],
-                        "اقلام": "، ".join(f"{i['name']} × {i['qty']:g}" for i in items_by_order.get(int(o["id"]), []))},
-                       "مبلغ (ریال)", float(o["total"] or 0)) for s, o in f_orders]
-    sec_p = [money_col({"تاریخ": jdate(p["d"]), "ساعت": str(p["t"])[:5], "مشتری": s["customer"], "ویزیتور": s["visitor"],
-                        "نوع": p["ptype"],
-                        "جزئیات": (f"چک {p['check_number']} · صیادی {p['check_sayyadi']} · سررسید {jdate(p['check_due'])}"
-                                   if p["ptype"] == "چک" else
-                                   f"حساب {p['tr_account']} · پیگیری {p['tr_tracking'] or p['tracking']}"
-                                   if p["ptype"] == "حواله" else "")},
-                       "مبلغ (ریال)", float(p["amount"] or 0)) for s, p in f_pays]
-    sec_k = [money_col({"کالا": r["name"], "کد": c, "تعداد": r["qty"], "سفارش‌ها": len(r["orders"])},
-                       "مبلغ (ریال)", r["amount"])
-             for c, r in sorted(prod_sum.items(), key=lambda x: -x[1]["amount"])]
-    m = ["مبلغ (ریال)"] if SHOW_MONEY else []
-    sections = [
-        ("ویزیت‌ها", ["#", "تاریخ", "ساعت", "مشتری", "ویزیتور", "ثبت‌ها", "توضیحات"], sec_v),
-        ("سفارش‌ها", ["شماره", "تاریخ", "ساعت", "مشتری", "ویزیتور", "اقلام"] + m, sec_o),
-        ("دریافت‌ها", ["تاریخ", "ساعت", "مشتری", "ویزیتور", "نوع"] + m + ["جزئیات"], sec_p),
-        ("خلاصهٔ کالاها", ["کالا", "کد", "تعداد", "سفارش‌ها"] + m, sec_k),
-    ]
-    return meta, sections
+bar = st.empty()
+pager = st.container(key="pager")
+pg_col, menu_col = pager.columns([6, 1])
+pages = PAGES if IS_ADMIN else PAGES[:3]
+page = pg_col.segmented_control("صفحه", pages, default=pages[0], key="page", required=True,
+                                label_visibility="collapsed")
+REFRESH = {"روشن — فقط وقتی ثبت جدید برسد": True, "خاموش": False}
 
-
-@st.cache_data(show_spinner=False, max_entries=20)
-def cached_excel(meta, sections):
-    return report.to_excel(meta, sections)
-
-
-@st.cache_data(show_spinner=False, max_entries=20)
-def cached_pdf(meta, sections):
-    return report.to_pdf(meta, sections)
-
-
-meta, sections = report_data()
-fname = f"PeechaVisit_{j0.strftime('%Y%m%d')}_{j1.strftime('%Y%m%d')}"
-REFRESH = {"خاموش": 0, "هر ۳۰ ثانیه": 30, "هر ۱ دقیقه": 60, "هر ۵ دقیقه": 300, "هر ۱۵ دقیقه": 900}
-
-with f_menu.popover("☰", use_container_width=True, help="منو"):
-    st.selectbox("🔄 بروزرسانی خودکار", list(REFRESH), index=2, key="auto_refresh")
-    st.toggle("🔔 اعلان ثبت‌های جدید", value=True, key="notify_on")
-    if CAN_EXPORT:
-        st.divider()
-        st.download_button("📥 Excel", data=cached_excel(meta, sections), file_name=f"{fname}.xlsx",
-                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                           use_container_width=True, on_click="ignore")
-        try:
-            st.download_button("📄 PDF", data=cached_pdf(meta, sections), file_name=f"{fname}.pdf",
-                               mime="application/pdf", use_container_width=True, on_click="ignore")
-        except Exception as e:
-            st.caption(f"PDF ساخته نشد: {e}")
-        if st.button("🖨️ چاپ", use_container_width=True):
-            st.session_state["want_print"] = True
-        st.caption("خروجی‌ها همان نتیجهٔ فیلترشدهٔ فعلی هستند.")
+with menu_col.popover("☰ منو", use_container_width=True):
+    st.selectbox("🔄 بروزرسانی خودکار", list(REFRESH), key="auto_refresh")
+    st.toggle("🔔 اعلان ثبت‌ها و پیام‌های جدید", value=True, key="notify_on")
     st.divider()
     st.caption(f"👤 {USER['name']} (@{USER['username']})")
     if st.button("🚪 خروج", use_container_width=True):
@@ -524,110 +485,9 @@ with f_menu.popover("☰", use_container_width=True, help="منو"):
 
 
 # ══════════════════════════════════════════════
-# اعلان ثبت‌های جدید + بروزرسانی خودکار
-# ══════════════════════════════════════════════
-def _new_rows(table, last_id):
-    f, p = _vis_filter("x", ALLOWED)
-    if table == "visits":
-        sql = f"""SELECT TOP 6 x.id, ISNULL(u.full_name,N'') AS visitor,
-                         ISNULL(CAST(c.C_Name AS NVARCHAR(200)), x.customer_code) AS customer,
-                         CONVERT(VARCHAR(5), x.visit_time, 108) AS t, ISNULL(x.selfie_path,'') AS img, NULL AS amount, '' AS ptype
-                  FROM visits x"""
-    elif table == "orders":
-        sql = f"""SELECT TOP 6 x.id, ISNULL(u.full_name,N'') AS visitor,
-                         ISNULL(CAST(c.C_Name AS NVARCHAR(200)), x.customer_code) AS customer,
-                         CONVERT(VARCHAR(5), x.order_time, 108) AS t, '' AS img, x.total_amount AS amount, '' AS ptype
-                  FROM orders x"""
-    else:
-        sql = f"""SELECT TOP 6 x.id, ISNULL(u.full_name,N'') AS visitor,
-                         ISNULL(CAST(c.C_Name AS NVARCHAR(200)), x.customer_code) AS customer,
-                         CONVERT(VARCHAR(5), x.payment_time, 108) AS t,
-                         ISNULL(x.check_image_path, ISNULL(x.transfer_image_path,'')) AS img,
-                         x.amount AS amount, x.payment_type AS ptype
-                  FROM payments x"""
-    sql += f""" LEFT JOIN visitors u ON u.id = x.visitor_id
-               LEFT JOIN {SALES}.customer c ON c.C_Code = x.customer_code
-               WHERE x.id > ? {f} ORDER BY x.id DESC"""
-    return read_sql(sql, (last_id,) + p)
-
-
-def _max_ids():
-    f, p = _vis_filter("x", ALLOWED)
-    out = {}
-    for t in ("visits", "orders", "payments"):
-        df = read_sql(f"SELECT ISNULL(MAX(x.id),0) AS m FROM {t} x WHERE 1=1 {f}", p)
-        out[t] = int(df["m"].iloc[0])
-    return out
-
-
-NOTE_KIND = {"visits": ("📍", "ویزیت جدید", KIND_COLOR["visit"]),
-             "orders": ("📦", "سفارش جدید", KIND_COLOR["order"]),
-             "payments": ("💰", "دریافت جدید", KIND_COLOR["pay"])}
-
-
-@st.fragment(run_every=15)
-def live():
-    ss = st.session_state
-    try:
-        cur = _max_ids()
-    except Exception:
-        return
-    if "last_ids" not in ss:
-        ss.last_ids, ss.notes = cur, []
-    new_found = False
-    for t, m in cur.items():
-        if m > ss.last_ids.get(t, 0):
-            if ss.get("notify_on", True):
-                for r in _new_rows(t, ss.last_ids[t]).itertuples():
-                    ss.notes.append({"t": t, "at": time.time(), "visitor": r.visitor, "customer": r.customer,
-                                     "time": r.t, "img": r.img, "amount": r.amount, "ptype": r.ptype})
-            ss.last_ids[t] = m
-            new_found = True
-    ss.notes = [n for n in ss.notes if time.time() - n["at"] < 20][-5:]
-    if ss.notes:
-        cards = []
-        for n in ss.notes:
-            icon, title, color = NOTE_KIND[n["t"]]
-            if n["t"] == "payments" and n["ptype"]:
-                title = f"دریافت {n['ptype']}"
-            src = img_src(n["img"], (160, 160)) if n["img"] else None
-            pic = f"<img src='{src}'>" if src else f"<div class='i'>{icon}</div>"
-            amount = f" · {money(n['amount'])}" if n["amount"] is not None and SHOW_MONEY else ""
-            cards.append(f"<div class='pv-note' style='--c:{color}'>{pic}<div><div class='t'>{title}</div>"
-                         f"<div class='n'>{esc(n['customer'])}</div>"
-                         f"<div class='m'>{esc(n['visitor'])} · ساعت {hhmm(n['time'])}{amount}</div></div></div>")
-        st.markdown("<div class='pv-notes'>" + "".join(cards) + "</div>", unsafe_allow_html=True)
-
-    # بروزرسانی خودکار کل صفحه (نه وقتی پنجرهٔ جزئیات باز است)
-    every = REFRESH.get(ss.get("auto_refresh", "هر ۱ دقیقه"), 60)
-    due = every and time.time() - ss.get("last_full_run", time.time()) >= every
-    if (due or (new_found and every)) and not ss.get("dlg_open"):
-        load_data.clear()
-        st.rerun(scope="app")
-
-
-st.session_state["last_full_run"] = time.time()
-live()
-
-# بعد از انتخاب از یک فیلتر، فوکوس در همان فیلتر می‌ماند و اولین کلیک روی جدول گم می‌شد؛
-# با فشردن جدول، فوکوس فیلتر برداشته می‌شود تا همان کلیک اول ردیف را انتخاب کند.
-components.html("""<script>
-const d = window.parent.document;
-if (!d.__pvGridFix) {
-  d.__pvGridFix = true;
-  d.addEventListener('pointerdown', e => {
-    const a = d.activeElement;
-    if (e.target.closest && e.target.closest('[data-testid="stDataFrame"]') && a && a.tagName === 'INPUT') a.blur();
-  }, true);
-}
-</script>""", height=0)
-
-
-# ══════════════════════════════════════════════
-# پنجره‌ها: جزئیات و چاپ
+# پنجرهٔ جزئیات
 # ══════════════════════════════════════════════
 def _closed():
-    # پاک شدن انتخاب نقشه و جدول تا کلیک دوباره روی همان مورد هم کار کند
     st.session_state["ui_ver"] = st.session_state.get("ui_ver", 0) + 1
     st.session_state.pop("want_print", None)
     st.session_state["dlg_open"] = False
@@ -636,6 +496,14 @@ def _closed():
 def kv(rows) -> str:
     return "<div class='kv'>" + "".join(
         f"<div><small>{k}</small><b>{v if v not in (None, '') else '—'}</b></div>" for k, v in rows) + "</div>"
+
+
+def acc_txt(s) -> str:
+    a = s.get("acc")
+    try:
+        return f"دقت ±{fa(int(round(float(a))))} متر" if a is not None and not pd.isna(a) else ""
+    except (TypeError, ValueError):
+        return ""
 
 
 def stop_images(s):
@@ -650,10 +518,11 @@ def stop_images(s):
     return imgs
 
 
-def order_html(o) -> str:
+def order_html(o, items_by_order) -> str:
     its = items_by_order.get(int(o["id"]), [])
+    note = f"<div class='note' style='margin-top:8px'><b>توضیح سفارش:</b> {esc(o['descr'])}</div>" if txt(o.get("descr")) else ""
     if not its:
-        return "<div class='muted'>اقلامی ثبت نشده است.</div>"
+        return "<div class='muted'>اقلامی ثبت نشده است.</div>" + note
     head = "<th>کالا</th><th>تعداد</th>" + ("<th>قیمت واحد</th><th>جمع</th>" if SHOW_MONEY else "")
     rows = ""
     for i in its:
@@ -661,8 +530,8 @@ def order_html(o) -> str:
         rows += (f"<tr><td>{esc(i['name'])}<div class='muted'>کد {fa(i['code'])}</div></td><td>{qty}</td>"
                  + (f"<td>{money(i['price'])}</td><td>{money(i['qty'] * i['price'])}</td>" if SHOW_MONEY else "")
                  + "</tr>")
-    foot = (f"<tfoot><tr><td colspan='3'>جمع سفارش</td><td>{money(o['total'])}</td></tr></tfoot>" if SHOW_MONEY else "")
-    return f"<table class='itm'><thead><tr>{head}</tr></thead><tbody>{rows}</tbody>{foot}</table>"
+    foot = f"<tfoot><tr><td colspan='3'>جمع سفارش</td><td>{money(o['total'])}</td></tr></tfoot>" if SHOW_MONEY else ""
+    return f"<table class='itm'><thead><tr>{head}</tr></thead><tbody>{rows}</tbody>{foot}</table>" + note
 
 
 def pay_html(p) -> str:
@@ -675,149 +544,323 @@ def pay_html(p) -> str:
     else:
         rows = [("نوع", "نقدی")]
     amount = f" — {money(p['amount'])}" if SHOW_MONEY else ""
-    return (f"<div class='dlg-amount' style='color:{KIND_COLOR['pay']};font-size:17px'>{p['ptype']}{amount}</div>"
-            + kv(rows))
+    note = f"<div class='note' style='margin-top:8px'><b>توضیح دریافت:</b> {esc(p['descr'])}</div>" if txt(p.get("descr")) else ""
+    return (f"<div style='font-weight:800;font-size:16px;color:{KIND_COLOR['pay']};margin-bottom:6px'>{p['ptype']}{amount}</div>"
+            + kv(rows) + note)
 
 
-KIND_LABEL = {"visit": ("ویزیت", "#edf1ff"), "order": ("سفارش", "#f3edff"), "pay": ("دریافت", "#e6f6ef")}
+KIND_LABEL = {"visit": "ویزیت", "order": "سفارش", "pay": "دریافت"}
 
 
-def acc_txt(s) -> str:
-    a = s.get("acc")
+def detail_dialog(stop_by_n, items_by_order):
+    @st.dialog("جزئیات", width="large", on_dismiss=_closed)
+    def show_stop(n: int, focus: str, ref: int | None):
+        s = stop_by_n[n]
+        focus_order = next((o for o in s["orders"] if int(o["id"]) == ref), None) if focus == "order" else None
+        focus_pay = next((p for p in s["pays"] if int(p["id"]) == ref), None) if focus == "pay" else None
+        color, soft = KIND_COLOR[focus], KIND_SOFT[focus]
+        title = s["customer"]
+        if focus_order:
+            title = f"سفارش شمارهٔ {fa(focus_order['id'])} — {s['customer']}"
+        elif focus_pay:
+            title = f"دریافت {focus_pay['ptype']} — {s['customer']}"
+        amount = ""
+        if SHOW_MONEY and focus_order:
+            amount = f"<div class='amount' style='color:{color}'>{money(focus_order['total'])}</div>"
+        elif SHOW_MONEY and focus_pay:
+            amount = f"<div class='amount' style='color:{color}'>{money(focus_pay['amount'])}</div>"
+        device = txt(s.get("device")) or txt((focus_order or focus_pay or {}).get("device"))
+        chips = [f"👤 {esc(s['visitor'])}", f"🏷️ کد مشتری {fa(s['customer_code'])}"]
+        if acc_txt(s):
+            chips.append(f"📍 {acc_txt(s)}")
+        if device:
+            chips.append(f"📱 <span dir='ltr'>{esc(device)}</span>")
+        st.markdown(
+            f"<div class='dh' style='background:{soft};border:1px solid {color}33'>"
+            f"<div class='time' style='color:{color}'><b>{hhmm(s['t'])}</b><small>{jweekday(s['d'])} {jdate(s['d'])}</small></div>"
+            f"<div class='who'><span class='kind' style='background:{color}'>{fa(n)} · {KIND_LABEL[focus]}</span>"
+            f"<div class='name'>{esc(title)}</div>{amount}"
+            f"<div class='chips'>{''.join(f'<span>{c}</span>' for c in chips)}</div></div></div>",
+            unsafe_allow_html=True)
+
+        if s["visit"] is not None and txt(s["visit"]["descr"]):
+            st.markdown(f"<div class='note'><b>📝 توضیح ویزیت:</b> {esc(s['visit']['descr'])}</div>", unsafe_allow_html=True)
+
+        imgs = stop_images(s)
+        if focus_pay:
+            own = focus_pay["check_img"] if focus_pay["ptype"] == "چک" else focus_pay["tr_img"]
+            imgs.sort(key=lambda x: x[0] != own)
+        if imgs:
+            st.markdown(gallery(imgs, f"{n}_{focus}"), unsafe_allow_html=True)
+
+        if focus_order:
+            st.markdown(f"<div class='box'><div class='sec'><i style='background:{KIND_COLOR['order']}'></i>اقلام سفارش</div>"
+                        f"{order_html(focus_order, items_by_order)}</div>", unsafe_allow_html=True)
+        elif focus_pay:
+            st.markdown(f"<div class='box'><div class='sec'><i style='background:{KIND_COLOR['pay']}'></i>جزئیات دریافت</div>"
+                        f"{pay_html(focus_pay)}</div>", unsafe_allow_html=True)
+
+        others_o = [o for o in s["orders"] if o is not focus_order]
+        others_p = [p for p in s["pays"] if p is not focus_pay]
+        if focus == "visit" or others_o or others_p:
+            if focus != "visit":
+                st.markdown("<div class='sec' style='margin-top:4px'>🔗 در همین ویزیت</div>", unsafe_allow_html=True)
+            c_o, c_p = st.columns(2)
+            with c_o:
+                body = "".join(f"<div class='muted'>سفارش شمارهٔ {fa(o['id'])}</div>{order_html(o, items_by_order)}"
+                               for o in others_o) or "<div class='muted'>سفارشی ثبت نشده است.</div>"
+                st.markdown(f"<div class='box'><div class='sec'><i style='background:{KIND_COLOR['order']}'></i>سفارش</div>{body}</div>",
+                            unsafe_allow_html=True)
+            with c_p:
+                body = "".join(pay_html(p) for p in others_p) or "<div class='muted'>دریافتی ثبت نشده است.</div>"
+                st.markdown(f"<div class='box'><div class='sec'><i style='background:{KIND_COLOR['pay']}'></i>دریافت</div>{body}</div>",
+                            unsafe_allow_html=True)
+
+        lat, lng = s.get("lat"), s.get("lng")
+        if lat and lng:
+            b1, b2, _ = st.columns([1, 1, 2])
+            b1.link_button("🗺️ گوگل‌مپ", f"https://www.google.com/maps?q={lat},{lng}", use_container_width=True)
+            b2.link_button("🧭 نشان", f"https://neshan.org/maps/@{lat},{lng},17z", use_container_width=True)
+    return show_stop
+
+
+# ══════════════════════════════════════════════
+# صفحهٔ ۱: نقشه و لیست
+# ══════════════════════════════════════════════
+def page_map():
+    ss = st.session_state
+    fbox = st.container(key="filters")
+    f_vis, f_per, f_date, f_cust, f_prod, f_exp, f_ref = fbox.columns([1.5, 1.25, 1.45, 2, 2, 0.8, 0.7])
+    sel_vname = f_vis.selectbox("ویزیتور", list(vis_opts), key="f_vis", label_visibility="collapsed")
+    sel_vid = vis_opts.get(sel_vname)
+    period = f_per.selectbox("بازه", PERIODS, index=4, key="f_period", label_visibility="collapsed")
+    if period == "بازه دلخواه":
+        with f_date.popover(ss.get("range_lbl", "📅 انتخاب بازه"), use_container_width=True):
+            st.caption("از تاریخ")
+            j0 = jalali_picker("from", jdatetime.date(today_j.year, today_j.month, 1))
+            st.caption("تا تاریخ")
+            j1 = jalali_picker("to", today_j)
+        if j1 < j0:
+            j0, j1 = j1, j0
+        g0, g1 = j0.togregorian(), j1.togregorian()
+        lbl = f"📅 {fa(j0.strftime('%m/%d'))} تا {fa(j1.strftime('%m/%d'))}"
+        if ss.get("range_lbl") != lbl:
+            ss["range_lbl"] = lbl
+            st.rerun()
+    else:
+        g0, g1 = period_range(period)
+        j0, j1 = jdatetime.date.fromgregorian(date=g0), jdatetime.date.fromgregorian(date=g1)
+        f_date.markdown(f"<div class='hint' style='text-align:center'>{fa(j0.strftime('%Y/%m/%d'))}"
+                        f"{'' if g0 == g1 else ' تا ' + fa(j1.strftime('%m/%d'))}</div>", unsafe_allow_html=True)
+    if f_ref.button("🔄", use_container_width=True, help="بروزرسانی"):
+        load_data.clear()
+        st.rerun()
+
+    vids = (sel_vid,) if sel_vid else ALLOWED
     try:
-        return f"دقت موقعیت ±{fa(int(round(float(a))))} متر" if a is not None and not pd.isna(a) else ""
-    except (TypeError, ValueError):
-        return ""
+        visits, orders, pays, items = load_data(g0.isoformat(), g1.isoformat(), vids)
+    except Exception as e:
+        st.error(f"❌ خطای دیتابیس: {e}")
+        st.stop()
+    all_stops = build_stops(visits, orders, pays)
 
+    cust_names = {}
+    for s in all_stops:
+        cust_names.setdefault(str(s["customer_code"]), s["customer"])
+    prod_names = dict(zip(items["code"].astype(str), items["name"])) if len(items) else {}
+    for k, opts in (("f_cust", cust_names), ("f_prod", prod_names)):      # گزینهٔ ناموجود در این بازه حذف شود
+        if k in ss:
+            ss[k] = [c for c in ss[k] if c in opts]
+    sel_cust = f_cust.multiselect("مشتری", sorted(cust_names, key=lambda c: cust_names[c]), key="f_cust",
+                                  label_visibility="collapsed", format_func=lambda c: f"{cust_names[c]} ({fa(c)})",
+                                  placeholder="🔍 همهٔ مشتریان")
+    sel_prod = f_prod.multiselect("کالا", sorted(prod_names, key=lambda c: prod_names[c]), key="f_prod",
+                                  label_visibility="collapsed", format_func=lambda c: f"{prod_names[c]} ({fa(c)})",
+                                  placeholder="🔍 همهٔ کالاها")
 
-@st.dialog("جزئیات", width="large", on_dismiss=_closed)
-def show_stop(n: int, focus: str, ref: int | None):
-    s = stop_by_n[n]
-    lbl, bg = KIND_LABEL[focus]
-    focus_order = next((o for o in s["orders"] if int(o["id"]) == ref), None) if focus == "order" else None
-    focus_pay = next((p for p in s["pays"] if int(p["id"]) == ref), None) if focus == "pay" else None
+    items_by_order = {}
+    for it in items.to_dict("records"):
+        items_by_order.setdefault(int(it["order_id"]), []).append(it)
 
-    head = s["customer"]
-    if focus_order:
-        head = f"سفارش شمارهٔ {fa(focus_order['id'])} — {s['customer']}"
-    elif focus_pay:
-        head = f"دریافت {focus_pay['ptype']} — {s['customer']}"
-    acc = acc_txt(s)
-    st.markdown(
-        f"<span class='dlg-kind' style='background:{bg};color:{KIND_COLOR[focus]}'>{lbl}</span>"
-        f"<div class='dlg-head'>{fa(n)}. {esc(head)}</div>"
-        + (f"<div class='dlg-amount' style='color:{KIND_COLOR['order']}'>{money(focus_order['total'])}</div>"
-           if focus_order and SHOW_MONEY else "")
-        + (f"<div class='dlg-amount' style='color:{KIND_COLOR['pay']}'>{money(focus_pay['amount'])}</div>"
-           if focus_pay and SHOW_MONEY else "")
-        + f"<div class='dlg-meta'>{jdate(s['d'])} · ساعت {hhmm(s['t'])} · {esc(s['visitor'])} · کد مشتری {fa(s['customer_code'])}"
-        + (f" · {acc}" if acc else "") + "</div>",
-        unsafe_allow_html=True)
+    stops = []
+    for s in all_stops:
+        if sel_cust and str(s["customer_code"]) not in sel_cust:
+            continue
+        if sel_prod:
+            ords = [o for o in s["orders"]
+                    if any(str(i["code"]) in sel_prod for i in items_by_order.get(int(o["id"]), []))]
+            if not ords:
+                continue
+            s = {**s, "orders": ords}
+        stops.append(s)
+    for i, s in enumerate(stops, 1):
+        s["n"] = i
+        s["ck"] = stop_kind(s)
+    stop_by_n = {s["n"]: s for s in stops}
 
-    imgs = stop_images(s)
-    if focus_pay:      # عکسِ همین دریافت اول بیاید
-        own = focus_pay["check_img"] if focus_pay["ptype"] == "چک" else focus_pay["tr_img"]
-        imgs.sort(key=lambda x: x[0] != own)
-    if imgs:
-        st.markdown(gallery(imgs, f"{n}_{focus}"), unsafe_allow_html=True)
+    f_visits = [s for s in stops if s["visit"] is not None]
+    f_orders = [(s, o) for s in stops for o in s["orders"]]
+    f_pays = [(s, p) for s in stops for p in s["pays"]]
+    order_sum = sum(float(o["total"] or 0) for _, o in f_orders)
+    pay_sum = sum(float(p["amount"] or 0) for _, p in f_pays)
+    prod_sum = {}
+    for _, o in f_orders:
+        for it in items_by_order.get(int(o["id"]), []):
+            if sel_prod and str(it["code"]) not in sel_prod:
+                continue
+            r = prod_sum.setdefault(str(it["code"]), {"name": it["name"], "qty": 0.0, "amount": 0.0, "orders": set()})
+            r["qty"] += float(it["qty"] or 0)
+            r["amount"] += float(it["qty"] or 0) * float(it["price"] or 0)
+            r["orders"].add(int(o["id"]))
 
-    if focus_order:
-        st.markdown(f"<div class='box'><div class='sec'>📦 اقلام سفارش</div>{order_html(focus_order)}</div>",
+    rtxt = range_text(j0, j1, g0, g1)
+    amt = lambda v: f" · {money(v)}" if SHOW_MONEY else ""
+    bar.markdown(app_bar("📍 داشبورد پیچا ویزیت", f"{rtxt} · {esc(sel_vname)}", [
+        f"<b>{fa(len(f_visits))}</b> ویزیت",
+        f"<b>{fa(len({s['customer_code'] for s in stops}))}</b> مشتری",
+        f"<b>{fa(len(f_orders))}</b> سفارش{amt(order_sum)}",
+        f"<b>{fa(len(f_pays))}</b> دریافت{amt(pay_sum)}",
+        f"👤 {esc(USER['name'])}",
+    ]), unsafe_allow_html=True)
+
+    # ── خروجی همین نتیجه ──
+    if CAN_EXPORT:
+        meta = [("بازه", rtxt), ("ویزیتور", sel_vname)]
+        if sel_cust:
+            meta.append(("مشتری", "، ".join(cust_names[c] for c in sel_cust)))
+        if sel_prod:
+            meta.append(("کالا", "، ".join(prod_names[c] for c in sel_prod)))
+        rows_v = [{"#": s["n"], "تاریخ": jdate(s["d"]), "ساعت": str(s["t"])[:5], "مشتری": s["customer"],
+                   "ویزیتور": s["visitor"], "توضیحات": s["visit"]["descr"]} for s in f_visits]
+        with f_exp.popover("📥", use_container_width=True, help="خروجی همین نتیجه"):
+            st.caption("خروجی کامل‌تر با فیلترهای بیشتر: صفحهٔ «📊 گزارش‌ساز»")
+            sec = [("ویزیت‌ها", ["#", "تاریخ", "ساعت", "مشتری", "ویزیتور", "توضیحات"], rows_v)]
+            st.download_button("📥 Excel ویزیت‌ها", data=cached_excel(tuple(meta), freeze(sec)),
+                               file_name=f"Visits_{j0.strftime('%Y%m%d')}.xlsx", use_container_width=True, on_click="ignore")
+
+    # ── باز کردن ثبتی که از اعلان آمده ──
+    to_open, focus_n = None, None
+    pend = ss.pop("pending_open", None)
+    if pend:
+        table, rid = pend
+        field = {"visits": "visit", "orders": "orders", "payments": "pays"}[table]
+        for s in stops:
+            if field == "visit" and s["visit"] is not None and int(s["visit"]["id"]) == rid:
+                to_open, focus_n = (s["n"], "visit", None), s["n"]
+            elif field != "visit" and any(int(x["id"]) == rid for x in s[field]):
+                to_open, focus_n = (s["n"], "order" if field == "orders" else "pay", rid), s["n"]
+        ss["note_focus"] = focus_n
+    focus_n = focus_n or ss.pop("note_focus", None)
+
+    ver = ss.setdefault("ui_ver", 0)
+    col_list, col_map = st.columns([1, 1.55], gap="medium")
+
+    def table(rows, cols, key, height=560, selectable=True):
+        """کلیک روی 👁 = جزئیات؛ کلیک روی بقیهٔ ستون‌ها = نمایش روی نقشه"""
+        if not rows:
+            st.caption("موردی نیست.")
+            return None, None
+        df = pd.DataFrame(rows)[cols[::-1]]
+        if not selectable:
+            st.dataframe(df, hide_index=True, use_container_width=True, height=height)
+            return None, None
+        ev = st.dataframe(df, hide_index=True, use_container_width=True, height=height, key=key,
+                          on_select="rerun", selection_mode="single-cell",
+                          column_config={"👁": st.column_config.TextColumn("👁", width=36, help="نمایش جزئیات"),
+                                         "#": st.column_config.TextColumn("#", width=36),
+                                         "ساعت": st.column_config.TextColumn("ساعت", width=52),
+                                         "تاریخ": st.column_config.TextColumn("تاریخ", width=86)})
+        cells = ev.selection.cells if ev and ev.selection else []
+        if not cells:
+            return None, None
+        r, c = cells[0]
+        target = rows[r]["_open"]
+        return (target, None) if c == "👁" else (None, target[0])
+
+    with col_list:
+        st.markdown("<div class='hint'>👁 = جزئیات کامل · کلیک روی ردیف = نمایش همان شماره روی نقشه</div>",
                     unsafe_allow_html=True)
-    elif focus_pay:
-        st.markdown(f"<div class='box'><div class='sec'>💰 جزئیات دریافت</div>{pay_html(focus_pay)}</div>",
-                    unsafe_allow_html=True)
+        tabs = st.tabs([f"ویزیت‌ها ({fa(len(f_visits))})", f"سفارش‌ها ({fa(len(f_orders))})",
+                        f"دریافت‌ها ({fa(len(f_pays))})", f"کالاها ({fa(len(prod_sum))})"])
+        m_col = ["مبلغ"] if SHOW_MONEY else []
+        with tabs[0]:
+            rows = [{"_open": (s["n"], "visit", None), "👁": "👁", "#": fa(s["n"]), "مشتری": s["customer"],
+                     "ویزیتور": s["visitor"], "تاریخ": jdate(s["d"]), "ساعت": hhmm(s["t"]),
+                     "توضیحات": txt(s["visit"]["descr"]),
+                     "ثبت‌ها": " + ".join(x for x in ["سفارش" if s["orders"] else "", "دریافت" if s["pays"] else ""] if x)}
+                    for s in f_visits]
+            o, f = table(rows, ["👁", "#", "مشتری", "ویزیتور", "تاریخ", "ساعت", "ثبت‌ها"], f"tv_{ver}")
+            to_open, focus_n = o or to_open, f or focus_n
+        with tabs[1]:
+            rows = [{"_open": (s["n"], "order", int(o_["id"])), "👁": "👁", "#": fa(s["n"]), "شماره": fa(o_["id"]),
+                     "مشتری": s["customer"], "ویزیتور": s["visitor"], "تاریخ": jdate(o_["d"]), "مبلغ": money(o_["total"]),
+                     "توضیحات": txt(o_["descr"])} for s, o_ in f_orders]
+            o, f = table(rows, ["👁", "#", "شماره", "مشتری", "ویزیتور", "تاریخ"] + m_col, f"to_{ver}")
+            to_open, focus_n = o or to_open, f or focus_n
+        with tabs[2]:
+            rows = [{"_open": (s["n"], "pay", int(p["id"])), "👁": "👁", "#": fa(s["n"]), "مشتری": s["customer"],
+                     "ویزیتور": s["visitor"], "تاریخ": jdate(p["d"]), "نوع": p["ptype"], "مبلغ": money(p["amount"]),
+                     "توضیحات": txt(p["descr"])} for s, p in f_pays]
+            o, f = table(rows, ["👁", "#", "مشتری", "ویزیتور", "تاریخ", "نوع"] + m_col, f"tp_{ver}")
+            to_open, focus_n = o or to_open, f or focus_n
+        with tabs[3]:
+            rows = [{"کالا": r["name"], "کد": fa(c), "تعداد": fa(f"{r['qty']:g}"), "سفارش": fa(len(r["orders"])),
+                     "مبلغ": money(r["amount"])} for c, r in sorted(prod_sum.items(), key=lambda x: -x[1]["amount"])]
+            table(rows, ["کالا", "کد", "تعداد", "سفارش"] + m_col, "tk", selectable=False)
 
-    others_o = [o for o in s["orders"] if o is not focus_order]
-    others_p = [p for p in s["pays"] if p is not focus_pay]
-    if focus == "visit" or others_o or others_p:
-        if focus != "visit":
-            st.markdown("<div class='sec' style='margin-top:4px'>🔗 در همین ویزیت</div>", unsafe_allow_html=True)
-        c_o, c_p = st.columns(2)
-        with c_o:
-            body = "".join(f"<div class='muted'>سفارش شمارهٔ {fa(o['id'])}</div>{order_html(o)}" for o in others_o) \
-                or "<div class='muted'>سفارشی ثبت نشده است.</div>"
-            st.markdown(f"<div class='box'><div class='sec'>📦 سفارش</div>{body}</div>", unsafe_allow_html=True)
-        with c_p:
-            body = "".join(pay_html(p) for p in others_p) or "<div class='muted'>دریافتی ثبت نشده است.</div>"
-            st.markdown(f"<div class='box'><div class='sec'>💰 دریافت</div>{body}</div>", unsafe_allow_html=True)
+    with col_map:
+        map_click = draw_map(stops, stop_by_n, focus_n, ver)
+        if map_click:
+            to_open = map_click
 
-    if s["visit"] is not None and s["visit"]["descr"]:
-        st.markdown(f"<div class='box'><div class='sec'>📝 توضیحات ویزیت</div>{esc(s['visit']['descr'])}</div>",
-                    unsafe_allow_html=True)
-
-    lat, lng = s.get("lat"), s.get("lng")
-    if lat and lng:
-        b1, b2, _ = st.columns([1, 1, 2])
-        b1.link_button("🗺️ گوگل‌مپ", f"https://www.google.com/maps?q={lat},{lng}", use_container_width=True)
-        b2.link_button("🧭 نشان", f"https://neshan.org/maps/@{lat},{lng},17z", use_container_width=True)
-
-
-@st.dialog("پیش‌نمایش چاپ", width="large", on_dismiss=_closed)
-def show_print():
-    components.html(report.to_html(meta, sections, font_css()), height=640, scrolling=True)
+    if to_open and to_open[0] in stop_by_n:
+        ss["dlg_open"] = True
+        detail_dialog(stop_by_n, items_by_order)(*to_open)
 
 
 # ══════════════════════════════════════════════
-# لیست (راست) + نقشه (چپ)
+# نقشه (رنگ‌های نرم، سایه و هالهٔ ملایم)
 # ══════════════════════════════════════════════
-ver = st.session_state.setdefault("ui_ver", 0)
-to_open = None          # (شمارهٔ توقف, نوع, شناسهٔ سفارش/دریافت) → پنجرهٔ جزئیات
-focus_n = None          # شمارهٔ توقفی که باید روی نقشه نشان داده شود
-col_list, col_map = st.columns([1, 1.55], gap="medium")
+MAP_CSS = """
+<style>
+.leaflet-container { background:#eef1f6; }
+/* رنگ ملایم‌تر نقشه (بدون نیاز به سرویس یا کلید جدا) */
+.leaflet-tile-pane { filter:saturate(.62) brightness(1.05) contrast(.92); }
+.leaflet-tooltip.pv-tip { direction:rtl; text-align:right; padding:10px 12px; border-radius:14px; border:0;
+  box-shadow:0 10px 30px rgba(16,24,40,.18); font-family:Vazirmatn,Tahoma,sans-serif; animation:tipIn .18s ease; }
+.leaflet-tooltip.pv-tip:before { display:none; }
+.pv-tip .h { font-weight:800; font-size:13px; color:#17202e; display:flex; align-items:center; gap:6px; }
+.pv-tip .h i { width:9px; height:9px; border-radius:50%; display:inline-block; }
+.pv-tip .m { font-size:11px; color:#6b7686; margin:2px 0 4px; }
+.pv-tip img { display:block; width:200px; max-height:140px; object-fit:cover; border-radius:10px; margin:6px 0; }
+.pv-tip .b { display:inline-block; font-size:11px; font-weight:700; border-radius:12px; padding:2px 8px; margin:2px 0 0 4px; }
+.pv-tip .f { font-size:10px; color:#adb5bd; margin-top:4px; }
+.pv-cl { width:38px; height:38px; border-radius:50%; background:rgba(2,0,37,.88); color:#fff; border:2px solid #fff;
+  font:800 13px Vazirmatn,Tahoma,sans-serif; display:flex; align-items:center; justify-content:center;
+  box-shadow:0 0 0 6px rgba(76,110,245,.18), 0 4px 12px rgba(16,24,40,.25); transition:transform .15s ease; }
+.pv-cl:hover { transform:scale(1.08); }
+.pv-pin { width:28px; height:28px; border-radius:50%; color:#fff; font:700 12px Vazirmatn,Tahoma,sans-serif;
+  display:flex; align-items:center; justify-content:center; border:2px solid #fff;
+  box-shadow:0 0 0 5px var(--halo), 0 3px 10px rgba(16,24,40,.25); transition:transform .15s ease, box-shadow .15s ease;
+  animation:pinIn .35s ease both; }
+.pv-pin:hover { transform:scale(1.15); box-shadow:0 0 0 7px var(--halo), 0 6px 16px rgba(16,24,40,.3); }
+.pv-focus { width:40px; height:40px; font-size:15px; border-width:3px; animation:pinIn .35s ease both, pulse 1.8s ease-out infinite; }
+.leaflet-tooltip.pv-flabel { font:800 13px Vazirmatn,Tahoma,sans-serif; direction:rtl; border-radius:10px; border:0;
+  box-shadow:0 6px 16px rgba(16,24,40,.18); }
+@keyframes pinIn { from { opacity:0; transform:scale(.6); } to { opacity:1; transform:none; } }
+@keyframes tipIn { from { opacity:0; } to { opacity:1; } }
+@keyframes pulse { 0% { box-shadow:0 0 0 0 var(--halo2), 0 3px 10px rgba(16,24,40,.25); }
+                   70% { box-shadow:0 0 0 18px rgba(0,0,0,0), 0 3px 10px rgba(16,24,40,.25); }
+                   100% { box-shadow:0 0 0 0 rgba(0,0,0,0), 0 3px 10px rgba(16,24,40,.25); } }
+</style>"""
 
 
-def table(rows, cols, key, height=560, selectable=True):
-    """کلیک روی 👁 = جزئیات؛ کلیک روی بقیهٔ ستون‌ها = نمایش روی نقشه"""
-    if not rows:
-        st.caption("موردی نیست.")
-        return None, None
-    df = pd.DataFrame(rows)[cols[::-1]]          # ستون اول در سمت راست دیده شود
-    if not selectable:
-        st.dataframe(df, hide_index=True, use_container_width=True, height=height)
-        return None, None
-    ev = st.dataframe(df, hide_index=True, use_container_width=True, height=height, key=key,
-                      on_select="rerun", selection_mode="single-cell",
-                      column_config={"👁": st.column_config.TextColumn("👁", width=36, help="نمایش جزئیات")})
-    cells = ev.selection.cells if ev and ev.selection else []
-    if not cells:
-        return None, None
-    r, c = cells[0]
-    target = rows[r]["_open"]
-    return (target, None) if c == "👁" else (None, target[0])
+def _hex_rgba(h, a):
+    h = h.lstrip("#")
+    return f"rgba({int(h[0:2], 16)},{int(h[2:4], 16)},{int(h[4:6], 16)},{a})"
 
 
-with col_list:
-    st.markdown("<div class='hint'>👁 = جزئیات کامل · کلیک روی هر ردیف = نمایش همان شماره روی نقشه</div>",
-                unsafe_allow_html=True)
-    tabs = st.tabs([f"ویزیت‌ها ({fa(len(f_visits))})", f"سفارش‌ها ({fa(len(f_orders))})",
-                    f"دریافت‌ها ({fa(len(f_pays))})", f"کالاها ({fa(len(prod_sum))})"])
-    m_col = ["مبلغ"] if SHOW_MONEY else []
-    with tabs[0]:
-        rows = [{"_open": (s["n"], "visit", None), "👁": "👁", "#": fa(s["n"]), "مشتری": s["customer"],
-                 "ویزیتور": s["visitor"], "تاریخ": jdate(s["d"]), "ساعت": hhmm(s["t"]),
-                 "ثبت‌ها": " + ".join(x for x in ["سفارش" if s["orders"] else "", "دریافت" if s["pays"] else ""] if x)}
-                for s in f_visits]
-        o, f = table(rows, ["👁", "#", "مشتری", "ویزیتور", "تاریخ", "ساعت", "ثبت‌ها"], f"tv_{ver}")
-        to_open, focus_n = o or to_open, f or focus_n
-    with tabs[1]:
-        rows = [{"_open": (s["n"], "order", int(o_["id"])), "👁": "👁", "#": fa(s["n"]), "شماره": fa(o_["id"]),
-                 "مشتری": s["customer"], "ویزیتور": s["visitor"], "تاریخ": jdate(o_["d"]), "مبلغ": money(o_["total"])}
-                for s, o_ in f_orders]
-        o, f = table(rows, ["👁", "#", "شماره", "مشتری", "ویزیتور", "تاریخ"] + m_col, f"to_{ver}")
-        to_open, focus_n = o or to_open, f or focus_n
-    with tabs[2]:
-        rows = [{"_open": (s["n"], "pay", int(p["id"])), "👁": "👁", "#": fa(s["n"]), "مشتری": s["customer"],
-                 "ویزیتور": s["visitor"], "تاریخ": jdate(p["d"]), "نوع": p["ptype"], "مبلغ": money(p["amount"])}
-                for s, p in f_pays]
-        o, f = table(rows, ["👁", "#", "مشتری", "ویزیتور", "تاریخ", "نوع"] + m_col, f"tp_{ver}")
-        to_open, focus_n = o or to_open, f or focus_n
-    with tabs[3]:
-        rows = [{"کالا": r["name"], "کد": fa(c), "تعداد": fa(f"{r['qty']:g}"), "سفارش": fa(len(r["orders"])),
-                 "مبلغ": money(r["amount"])} for c, r in sorted(prod_sum.items(), key=lambda x: -x[1]["amount"])]
-        table(rows, ["کالا", "کد", "تعداد", "سفارش"] + m_col, "tk", selectable=False)
-
-with col_map:
+def draw_map(stops, stop_by_n, focus_n, ver):
     pts = [s for s in stops if s.get("lat") and s.get("lng")]
     visitor_ids = sorted({int(s["visitor_id"]) for s in stops})
     rcolor = {vid: ROUTE_COLORS[i % len(ROUTE_COLORS)] for i, vid in enumerate(visitor_ids)}
@@ -831,80 +874,64 @@ with col_map:
     st.markdown(f"<div class='legend'>{legend}</div>", unsafe_allow_html=True)
 
     m = folium.Map(location=[35.6997, 51.3380], zoom_start=11, control_scale=True, tiles="OpenStreetMap", max_zoom=19)
-    m.get_root().header.add_child(folium.Element(font_css().replace(".stApp *", "body *") + """
-<style>
-.leaflet-tooltip.pv-tip { direction:rtl; text-align:right; padding:8px 10px; border-radius:10px;
-  border:1px solid #dfe3ea; box-shadow:0 6px 18px rgba(16,24,40,.16); font-family:Vazirmatn,Tahoma,sans-serif; }
-.pv-tip .h { font-weight:800; font-size:13px; color:#17202e; }
-.pv-tip .m { font-size:11px; color:#6b7686; margin:1px 0 4px; }
-.pv-tip img { display:block; width:200px; max-height:140px; object-fit:cover; border-radius:8px; margin:4px 0; }
-.pv-tip .b { display:inline-block; font-size:11px; font-weight:700; border-radius:12px; padding:1px 8px; margin:2px 0 0 4px; }
-.pv-tip .f { font-size:10px; color:#868e96; margin-top:4px; }
-.pv-cl { width:36px; height:36px; border-radius:50%; background:#020025; color:#fff; border:3px solid #fff;
-  font:800 13px Vazirmatn,Tahoma,sans-serif; display:flex; align-items:center; justify-content:center;
-  box-shadow:0 1px 5px rgba(0,0,0,.4); }
-.pv-pin { width:28px; height:28px; border-radius:50%; color:#fff; font:700 12px Vazirmatn,Tahoma,sans-serif;
-  display:flex; align-items:center; justify-content:center; border:2px solid #fff; box-shadow:0 1px 4px rgba(0,0,0,.35); }
-.pv-focus { width:40px; height:40px; font-size:15px; border:3px solid #fff; box-shadow:0 0 0 4px rgba(250,176,5,.9), 0 2px 8px rgba(0,0,0,.4); }
-.leaflet-tooltip.pv-flabel { font:800 13px Vazirmatn,Tahoma,sans-serif; direction:rtl; border-radius:8px; }
-</style>"""))
+    m.get_root().header.add_child(folium.Element(font_css().replace(".stApp *", "body *") + "\n" + MAP_CSS))
 
-    # مسیر هر ویزیتور در هر روز
     routes = {}
     for s in pts:
         routes.setdefault((int(s["visitor_id"]), str(s["d"])), []).append([float(s["lat"]), float(s["lng"])])
     for (vid, _), line in routes.items():
         if len(line) > 1:
-            folium.PolyLine(line, color=rcolor[vid], weight=3, opacity=.5, dash_array="6 6").add_to(m)
+            folium.PolyLine(line, color=rcolor[vid], weight=4, opacity=.35, dash_array="2 8",
+                            line_cap="round", line_join="round").add_to(m)
 
-    # نشانگرهای نزدیک به هم گروه می‌شوند (عدد = تعداد)؛ کلیک روی گروه = بزرگ‌نمایی و
-    # در بیشترین بزرگ‌نمایی، نشانگرهای هم‌مکان از هم باز می‌شوند
     cluster = MarkerCluster(
         options={"maxClusterRadius": 45, "spiderfyOnMaxZoom": True, "showCoverageOnHover": False,
                  "spiderfyDistanceMultiplier": 2},
-        icon_create_function="""function(c){return L.divIcon({className:'',iconSize:[36,36],
+        icon_create_function="""function(c){return L.divIcon({className:'',iconSize:[38,38],
             html:'<div class="pv-cl">'+c.getChildCount().toLocaleString('fa-IR')+'</div>'});}""",
     ).add_to(m)
 
     def tip_html(s):
+        c = STOP_COLORS[s["ck"]][0]
         badges = ""
         if s["orders"]:
-            amount = f" {money(sum(o['total'] or 0 for o in s['orders']))}" if SHOW_MONEY else ""
-            badges += f"<span class='b' style='background:#f3edff;color:{KIND_COLOR['order']}'>سفارش{amount}</span>"
+            a = f" {money(sum(o['total'] or 0 for o in s['orders']))}" if SHOW_MONEY else ""
+            badges += f"<span class='b' style='background:{KIND_SOFT['order']};color:{KIND_COLOR['order']}'>سفارش{a}</span>"
         for p in s["pays"]:
-            amount = f" {money(p['amount'])}" if SHOW_MONEY else ""
-            badges += f"<span class='b' style='background:#e6f6ef;color:{KIND_COLOR['pay']}'>{p['ptype']}{amount}</span>"
+            a = f" {money(p['amount'])}" if SHOW_MONEY else ""
+            badges += f"<span class='b' style='background:{KIND_SOFT['pay']};color:{KIND_COLOR['pay']}'>{p['ptype']}{a}</span>"
         th = img_src(s["visit"]["selfie"]) if s["visit"] is not None else None
-        img_tag = f"<img src='{th}'>" if th else ""
+        img = f"<img src='{th}'>" if th else ""
         acc = acc_txt(s)
-        return (f"<div class='h'>{fa(s['n'])}. {esc(s['customer'])}</div>"
+        return (f"<div class='h'><i style='background:{c}'></i>{fa(s['n'])}. {esc(s['customer'])}</div>"
                 f"<div class='m'>{jdate(s['d'])} · {hhmm(s['t'])} · {esc(s['visitor'])}{' · ' + acc if acc else ''}</div>"
-                f"{img_tag}{badges}<div class='f'>برای جزئیات کلیک کنید</div>")
+                f"{img}{badges}<div class='f'>برای جزئیات کلیک کنید</div>")
 
     focus = stop_by_n.get(focus_n) if focus_n else None
     for s in pts:
         if focus is not None and s is focus:
             continue
-        color = STOP_COLORS[s["ck"]][0]
+        c = STOP_COLORS[s["ck"]][0]
         folium.Marker(
             [float(s["lat"]), float(s["lng"])],
-            icon=folium.DivIcon(html=f"<div class='pv-pin' style='background:{color}'>{fa(s['n'])}</div>",
+            icon=folium.DivIcon(html=f"<div class='pv-pin' style='background:{c};--halo:{_hex_rgba(c, .18)}'>{fa(s['n'])}</div>",
                                 icon_size=(28, 28), icon_anchor=(14, 14)),
             tooltip=folium.Tooltip(tip_html(s), class_name="pv-tip", sticky=False),
         ).add_to(cluster)
 
     if focus is not None and focus.get("lat") and focus.get("lng"):
-        # ردیف انتخاب‌شده: نشانگر بزرگ با برچسب دائمی، بیرون از گروه‌بندی، و دایرهٔ دقت GPS
         flat, flng = float(focus["lat"]), float(focus["lng"])
         try:
             acc_m = float(focus.get("acc")) if focus.get("acc") is not None and not pd.isna(focus.get("acc")) else None
         except (TypeError, ValueError):
             acc_m = None
+        c = STOP_COLORS[focus["ck"]][0]
         if acc_m:
-            folium.Circle([flat, flng], radius=acc_m, color="#fab005", weight=1, fill=True, fill_opacity=.12).add_to(m)
+            folium.Circle([flat, flng], radius=acc_m, color=c, weight=1, opacity=.5, fill=True, fill_opacity=.08).add_to(m)
         folium.Marker(
             [flat, flng], z_index_offset=10000,
-            icon=folium.DivIcon(html=f"<div class='pv-pin pv-focus' style='background:{STOP_COLORS[focus['ck']][0]}'>{fa(focus['n'])}</div>",
+            icon=folium.DivIcon(html=f"<div class='pv-pin pv-focus' style='background:{c};--halo:{_hex_rgba(c, .22)};"
+                                     f"--halo2:{_hex_rgba(c, .45)}'>{fa(focus['n'])}</div>",
                                 icon_size=(40, 40), icon_anchor=(20, 20)),
             tooltip=folium.Tooltip(f"{fa(focus['n'])}. {esc(focus['customer'])}", permanent=True,
                                    direction="top", offset=(0, -18), class_name="pv-flabel"),
@@ -915,21 +942,431 @@ with col_map:
         lngs = [float(s["lng"]) for s in pts]
         m.fit_bounds([[min(lats), min(lngs)], [max(lats), max(lngs)]], padding=(30, 30), max_zoom=16)
 
+    stabilize(m)
     out = st_folium(m, key=f"map_{ver}_{focus_n or 0}", height=600, use_container_width=True,
                     returned_objects=["last_object_clicked_tooltip"])
     tip_txt = (out or {}).get("last_object_clicked_tooltip") or ""
     mt = re.match(r"\s*([0-9]+)\.", tip_txt.translate(_EN))
-    if mt and int(mt.group(1)) in stop_by_n:
-        n_ = int(mt.group(1))
-        k_ = stop_by_n[n_]["kind"]
-        to_open = (n_, k_, None)
     if not stops:
         st.info("با این فیلترها موردی وجود ندارد. بازه، ویزیتور، مشتری یا کالا را تغییر دهید.")
+    if mt and int(mt.group(1)) in stop_by_n:
+        n_ = int(mt.group(1))
+        return (n_, stop_by_n[n_]["kind"], None)
+    return None
 
-# فقط یک پنجره در هر اجرا
-if st.session_state.get("want_print") and CAN_EXPORT:
-    st.session_state["dlg_open"] = True
-    show_print()
-elif to_open and to_open[0] in stop_by_n:
-    st.session_state["dlg_open"] = True
-    show_stop(*to_open)
+
+# ══════════════════════════════════════════════
+# خروجی‌ها (کش)
+# ══════════════════════════════════════════════
+def freeze(sections):
+    return tuple((n, tuple(c), tuple(tuple(sorted(r.items())) for r in rows)) for n, c, rows in sections)
+
+
+def thaw(fsections):
+    return [(n, list(c), [dict(r) for r in rows]) for n, c, rows in fsections]
+
+
+@st.cache_data(show_spinner=False, max_entries=20)
+def cached_excel(meta, fsections):
+    return report.to_excel(list(meta), thaw(fsections))
+
+
+@st.cache_data(show_spinner=False, max_entries=20)
+def cached_pdf(meta, fsections):
+    return report.to_pdf(list(meta), thaw(fsections))
+
+
+# ══════════════════════════════════════════════
+# صفحهٔ ۲: گزارش‌ساز (فیلترهای ترکیبی)
+# ══════════════════════════════════════════════
+GROUPS = ["بدون گروه‌بندی", "ویزیتور", "مشتری", "روز", "کالا"]
+TYPES = ["ویزیت", "سفارش", "دریافت"]
+PTYPES = ["نقدی", "چک", "حواله"]
+
+
+def page_report():
+    ss = st.session_state
+    bar.markdown(app_bar("📊 گزارش‌ساز", "فیلترها را ترکیب کنید؛ نتیجه همان لحظه به‌روز می‌شود",
+                         [f"👤 {esc(USER['name'])}"]), unsafe_allow_html=True)
+    with st.container(border=True):
+        c1, c2 = st.columns(2)
+        with c1:
+            st.caption("از تاریخ")
+            j0 = jalali_picker("rfrom", jdatetime.date(today_j.year, today_j.month, 1))
+        with c2:
+            st.caption("تا تاریخ")
+            j1 = jalali_picker("rto", today_j)
+        if j1 < j0:
+            j0, j1 = j1, j0
+        g0, g1 = j0.togregorian(), j1.togregorian()
+        try:
+            visits, orders, pays, items = load_data(g0.isoformat(), g1.isoformat(), ALLOWED)
+        except Exception as e:
+            st.error(f"❌ خطای دیتابیس: {e}")
+            return
+        vnames = {int(r["id"]): r["full_name"] for _, r in vis_df.iterrows()}
+        cnames = {}
+        for df in (visits, orders, pays):
+            for r in df.itertuples():
+                cnames.setdefault(str(r.customer_code), r.customer)
+        pnames = dict(zip(items["code"].astype(str), items["name"])) if len(items) else {}
+
+        r1 = st.columns(3)
+        f_v = r1[0].multiselect("ویزیتورها", list(vnames), format_func=lambda v: vnames[v], placeholder="همه", key="r_v")
+        f_c = r1[1].multiselect("مشتری‌ها", sorted(cnames, key=lambda c: cnames[c]),
+                                format_func=lambda c: f"{cnames[c]} ({fa(c)})", placeholder="همه", key="r_c")
+        f_p = r1[2].multiselect("کالاها", sorted(pnames, key=lambda c: pnames[c]),
+                                format_func=lambda c: f"{pnames[c]} ({fa(c)})", placeholder="همه", key="r_p",
+                                help="با انتخاب کالا فقط سفارش‌هایی که آن کالا را دارند می‌آیند.")
+        r2 = st.columns([1.3, 1.3, 1, 1, 1.2])
+        f_t = r2[0].multiselect("نوع ثبت", TYPES, default=TYPES, key="r_t")
+        f_pt = r2[1].multiselect("نوع دریافت", PTYPES, default=PTYPES, key="r_pt")
+        f_min = r2[2].number_input("حداقل مبلغ (ریال)", min_value=0, value=0, step=100000, key="r_min",
+                                   disabled=not SHOW_MONEY)
+        f_max = r2[3].number_input("حداکثر مبلغ (ریال)", min_value=0, value=0, step=100000, key="r_max",
+                                   help="صفر = بدون سقف", disabled=not SHOW_MONEY)
+        f_g = r2[4].selectbox("گروه‌بندی", GROUPS, key="r_g")
+
+    items_by_order = {}
+    for it in items.to_dict("records"):
+        items_by_order.setdefault(int(it["order_id"]), []).append(it)
+
+    def keep(r, kind, amount=None):
+        if f_v and int(r["visitor_id"]) not in f_v:
+            return False
+        if f_c and str(r["customer_code"]) not in f_c:
+            return False
+        if amount is not None and SHOW_MONEY:
+            if f_min and amount < f_min:
+                return False
+            if f_max and amount > f_max:
+                return False
+        return True
+
+    recs = []
+    if "ویزیت" in f_t and not f_p:
+        for r in visits.to_dict("records"):
+            if keep(r, "visit"):
+                recs.append({"نوع": "ویزیت", "تاریخ": jdate(r["d"]), "ساعت": str(r["t"])[:5], "ویزیتور": r["visitor"],
+                             "مشتری": r["customer"], "جزئیات": "", "مبلغ (ریال)": None, "توضیحات": txt(r["descr"]),
+                             "_d": str(r["d"]), "_v": r["visitor"], "_c": r["customer"]})
+    if "سفارش" in f_t:
+        for r in orders.to_dict("records"):
+            its = items_by_order.get(int(r["id"]), [])
+            if f_p and not any(str(i["code"]) in f_p for i in its):
+                continue
+            if keep(r, "order", float(r["total"] or 0)):
+                recs.append({"نوع": "سفارش", "تاریخ": jdate(r["d"]), "ساعت": str(r["t"])[:5], "ویزیتور": r["visitor"],
+                             "مشتری": r["customer"], "جزئیات": "، ".join(f"{i['name']} × {i['qty']:g}" for i in its),
+                             "مبلغ (ریال)": float(r["total"] or 0), "توضیحات": txt(r["descr"]),
+                             "_d": str(r["d"]), "_v": r["visitor"], "_c": r["customer"], "_items": its})
+    if "دریافت" in f_t and not f_p:
+        for r in pays.to_dict("records"):
+            if r["ptype"] not in f_pt:
+                continue
+            if keep(r, "pay", float(r["amount"] or 0)):
+                det = (f"چک {r['check_number']} · سررسید {jdate(r['check_due'])}" if r["ptype"] == "چک"
+                       else f"پیگیری {r['tr_tracking'] or r['tracking']}" if r["ptype"] == "حواله" else "نقدی")
+                recs.append({"نوع": f"دریافت {r['ptype']}", "تاریخ": jdate(r["d"]), "ساعت": str(r["t"])[:5],
+                             "ویزیتور": r["visitor"], "مشتری": r["customer"], "جزئیات": det,
+                             "مبلغ (ریال)": float(r["amount"] or 0), "توضیحات": txt(r["descr"]),
+                             "_d": str(r["d"]), "_v": r["visitor"], "_c": r["customer"]})
+    recs.sort(key=lambda x: (x["_d"], x["ساعت"]))
+
+    n_v = sum(1 for r in recs if r["نوع"] == "ویزیت")
+    n_o = [r for r in recs if r["نوع"] == "سفارش"]
+    n_p = [r for r in recs if r["نوع"].startswith("دریافت")]
+    s_o, s_p = sum(r["مبلغ (ریال)"] for r in n_o), sum(r["مبلغ (ریال)"] for r in n_p)
+    amt = lambda v: f" · {money(v)}" if SHOW_MONEY else ""
+    st.markdown("<div class='legend' style='margin-top:6px'>"
+                f"<span><i style='background:{KIND_COLOR['visit']}'></i>{fa(n_v)} ویزیت</span>"
+                f"<span><i style='background:{KIND_COLOR['order']}'></i>{fa(len(n_o))} سفارش{amt(s_o)}</span>"
+                f"<span><i style='background:{KIND_COLOR['pay']}'></i>{fa(len(n_p))} دریافت{amt(s_p)}</span>"
+                f"<span>{fa(len(recs))} ردیف · {range_text(j0, j1, g0, g1)}</span></div>", unsafe_allow_html=True)
+
+    # ── گروه‌بندی ──
+    grp_rows, grp_cols = [], []
+    if f_g == "کالا":
+        agg = {}
+        for r in n_o:
+            for i in r["_items"]:
+                if f_p and str(i["code"]) not in f_p:
+                    continue
+                a = agg.setdefault(str(i["code"]), {"کالا": i["name"], "کد": str(i["code"]), "تعداد": 0.0,
+                                                   "سفارش‌ها": 0, "مبلغ (ریال)": 0.0})
+                a["تعداد"] += float(i["qty"] or 0)
+                a["سفارش‌ها"] += 1
+                a["مبلغ (ریال)"] += float(i["qty"] or 0) * float(i["price"] or 0)
+        grp_rows = sorted(agg.values(), key=lambda x: -x["مبلغ (ریال)"])
+        grp_cols = ["کالا", "کد", "تعداد", "سفارش‌ها"] + (["مبلغ (ریال)"] if SHOW_MONEY else [])
+    elif f_g != "بدون گروه‌بندی":
+        kf = {"ویزیتور": "_v", "مشتری": "_c", "روز": "تاریخ"}[f_g]
+        agg = {}
+        for r in recs:
+            a = agg.setdefault(r[kf], {f_g: r[kf], "ویزیت": 0, "سفارش": 0, "مبلغ سفارش (ریال)": 0.0,
+                                       "دریافت": 0, "مبلغ دریافت (ریال)": 0.0})
+            if r["نوع"] == "ویزیت":
+                a["ویزیت"] += 1
+            elif r["نوع"] == "سفارش":
+                a["سفارش"] += 1; a["مبلغ سفارش (ریال)"] += r["مبلغ (ریال)"]
+            else:
+                a["دریافت"] += 1; a["مبلغ دریافت (ریال)"] += r["مبلغ (ریال)"]
+        grp_rows = sorted(agg.values(), key=lambda x: str(x[f_g]))
+        grp_cols = [f_g, "ویزیت", "سفارش"] + (["مبلغ سفارش (ریال)"] if SHOW_MONEY else []) + ["دریافت"] + \
+                   (["مبلغ دریافت (ریال)"] if SHOW_MONEY else [])
+
+    detail_cols = ["تاریخ", "ساعت", "نوع", "مشتری", "ویزیتور", "جزئیات"] + (["مبلغ (ریال)"] if SHOW_MONEY else []) + ["توضیحات"]
+
+    def show_df(rows, cols, height):
+        df = pd.DataFrame([{c: report.fmt(r.get(c), c) if r.get(c) not in ("",) else "—" for c in cols}
+                           for r in rows], columns=cols)
+        st.dataframe(df[cols[::-1]], hide_index=True, use_container_width=True, height=height)
+
+    if grp_rows:
+        st.markdown(f"<div class='sec'>خلاصه بر اساس {f_g}</div>", unsafe_allow_html=True)
+        show_df(grp_rows, grp_cols, min(420, 38 + 35 * len(grp_rows)))
+    st.markdown("<div class='sec'>ریز ثبت‌ها</div>", unsafe_allow_html=True)
+    if recs:
+        show_df(recs, detail_cols, 460)
+    else:
+        st.info("با این فیلترها ثبتی پیدا نشد.")
+
+    if CAN_EXPORT and recs:
+        meta = [("بازه", range_text(j0, j1, g0, g1))]
+        for lbl, vals, names in (("ویزیتور", f_v, vnames), ("مشتری", f_c, cnames), ("کالا", f_p, pnames)):
+            if vals:
+                meta.append((lbl, "، ".join(str(names[v]) for v in vals)))
+        meta.append(("نوع ثبت", "، ".join(f_t)))
+        meta.append(("جمع", f"{fa(n_v)} ویزیت · {fa(len(n_o))} سفارش{amt(s_o)} · {fa(len(n_p))} دریافت{amt(s_p)}"))
+        clean = lambda rows, cols: [{c: r.get(c) for c in cols} for r in rows]
+        sections = ([(f"خلاصه بر اساس {f_g}", grp_cols, clean(grp_rows, grp_cols))] if grp_rows else []) + \
+                   [("ریز ثبت‌ها", detail_cols, clean(recs, detail_cols))]
+        fz, mt = freeze(sections), tuple(meta)
+        fname = f"PeechaVisit_Report_{j0.strftime('%Y%m%d')}_{j1.strftime('%Y%m%d')}"
+        e1, e2, e3, _ = st.columns([1, 1, 1, 3])
+        e1.download_button("📥 Excel", data=cached_excel(mt, fz), file_name=f"{fname}.xlsx",
+                           use_container_width=True, on_click="ignore")
+        try:
+            e2.download_button("📄 PDF", data=cached_pdf(mt, fz), file_name=f"{fname}.pdf", mime="application/pdf",
+                               use_container_width=True, on_click="ignore")
+        except Exception as e:
+            e2.caption(f"PDF ساخته نشد: {e}")
+        if e3.button("🖨️ چاپ", use_container_width=True):
+            ss["dlg_open"] = True
+
+            @st.dialog("پیش‌نمایش چاپ", width="large", on_dismiss=_closed)
+            def _print():
+                components.html(report.to_html(meta, sections, font_css()), height=640, scrolling=True)
+            _print()
+
+
+# ══════════════════════════════════════════════
+# صفحهٔ ۳: پیام‌ها
+# ══════════════════════════════════════════════
+def page_messages():
+    ss = st.session_state
+    me = int(USER["id"])
+    users = read_sql("SELECT id, full_name, ISNULL(role,'visitor') AS role FROM visitors WHERE is_active=1 AND id<>? "
+                     "ORDER BY CASE WHEN role='admin' THEN 0 ELSE 1 END, full_name", (me,))
+    unread = read_sql("SELECT sender_id, COUNT(*) AS n FROM messages WHERE recipient_id=? AND read_at IS NULL "
+                      "GROUP BY sender_id", (me,))
+    un = dict(zip(unread["sender_id"].astype(int), unread["n"].astype(int))) if len(unread) else {}
+    bar.markdown(app_bar("💬 پیام‌ها", "گفتگو با ویزیتورها و همکاران",
+                         [f"<b>{fa(sum(un.values()))}</b> پیام خوانده‌نشده", f"👤 {esc(USER['name'])}"]),
+                 unsafe_allow_html=True)
+    names = {int(r["id"]): r["full_name"] + (" (مدیر)" if r["role"] == "admin" else "") for _, r in users.iterrows()}
+    opts = (["all"] if IS_ADMIN else []) + list(names)
+    if not opts:
+        st.info("کاربر دیگری برای گفتگو وجود ندارد.")
+        return
+    c_list, c_chat = st.columns([1, 2.4], gap="medium")
+    with c_list:
+        who = st.radio("گفتگو با", opts, key="chat_with", label_visibility="collapsed",
+                       format_func=lambda u: "📣 پیام به همه" if u == "all"
+                       else f"{names[u]}{'  🔵 ' + fa(un[u]) if un.get(u) else ''}")
+    with c_chat:
+        if who == "all":
+            st.markdown("<div class='chat'><div class='muted' style='margin:auto'>این پیام برای همهٔ کاربران فعال فرستاده می‌شود.</div></div>",
+                        unsafe_allow_html=True)
+        else:
+            if un.get(who):
+                run_sql("UPDATE messages SET read_at=GETDATE() WHERE recipient_id=? AND sender_id=? AND read_at IS NULL",
+                        (me, who))
+            conv = read_sql("""SELECT TOP 200 id, sender_id, body, CONVERT(VARCHAR(16), created_at, 120) AS at
+                               FROM messages WHERE (sender_id=? AND recipient_id=?) OR (sender_id=? AND recipient_id=?)
+                               ORDER BY id DESC""", (me, who, who, me)).iloc[::-1]
+            bubbles = "".join(
+                f"<div class='bub {'me' if int(r.sender_id) == me else 'them'}'>{esc(r.body)}"
+                f"<small>{jdate(r.at[:10])} {fa(r.at[11:16])}</small></div>" for r in conv.itertuples()) \
+                or "<div class='muted' style='margin:auto'>هنوز پیامی رد و بدل نشده است.</div>"
+            st.markdown(f"<div class='chat' id='chatbox'>{bubbles}</div>", unsafe_allow_html=True)
+            components.html("<script>const c=window.parent.document.getElementById('chatbox');if(c)c.scrollTop=c.scrollHeight;</script>",
+                            height=0)
+        with st.form("send_msg", clear_on_submit=True, border=False):
+            fc1, fc2 = st.columns([5, 1])
+            body = fc1.text_input("پیام", placeholder="پیام خود را بنویسید...", label_visibility="collapsed")
+            sent = fc2.form_submit_button("ارسال", type="primary", use_container_width=True)
+        if sent and body.strip():
+            targets = list(names) if who == "all" else [who]
+            for t in targets:
+                run_sql("INSERT INTO messages (sender_id, recipient_id, body) VALUES (?,?,?)", (me, t, body.strip()[:2000]))
+            audit.log_event("dashboard", "message", me, USER["username"], detail=f"به {'همه' if who == 'all' else who}")
+            if who == "all":
+                st.toast(f"پیام برای {fa(len(targets))} نفر ارسال شد.")
+            st.rerun()
+
+
+# ══════════════════════════════════════════════
+# صفحهٔ ۴: لاگ ورود و فعالیت (فقط مدیر)
+# ══════════════════════════════════════════════
+def page_logs():
+    bar.markdown(app_bar("📜 لاگ ورود و فعالیت", "ورود به اپ، داشبورد و پنل مدیریت؛ ثبت‌ها و پیام‌ها با دستگاه",
+                         [f"👤 {esc(USER['name'])}"]), unsafe_allow_html=True)
+    c = st.columns([1.2, 1.2, 1.5, 1.5, 1.5])
+    with c[0]:
+        days = st.selectbox("بازه", [1, 7, 30, 90], index=1, format_func=lambda d: f"{fa(d)} روز اخیر", key="lg_days")
+    src = c[1].multiselect("منبع", list(audit.SOURCE_LABELS), format_func=lambda s: audit.SOURCE_LABELS[s],
+                           placeholder="همه", key="lg_src")
+    evt = c[2].multiselect("رویداد", list(audit.EVENT_LABELS), format_func=lambda e: audit.EVENT_LABELS[e],
+                           placeholder="همه", key="lg_evt")
+    usr = c[3].text_input("نام کاربری", placeholder="همه", key="lg_user")
+    dev = c[4].text_input("دستگاه (برند/مدل)", placeholder="همه", key="lg_dev")
+    sql = """SELECT TOP 2000 CONVERT(VARCHAR(19), created_at, 120) AS at, ISNULL(username,'') AS username, source, event,
+                    ISNULL(device,'') AS device, ISNULL(ip,'') AS ip, ISNULL(detail,'') AS detail
+             FROM access_log WHERE created_at >= DATEADD(day, ?, GETDATE())"""
+    prm = [-int(days)]
+    if src:
+        sql += f" AND source IN ({','.join('?' * len(src))})"; prm += src
+    if evt:
+        sql += f" AND event IN ({','.join('?' * len(evt))})"; prm += evt
+    if usr.strip():
+        sql += " AND username LIKE ?"; prm.append(f"%{usr.strip()}%")
+    if dev.strip():
+        sql += " AND device LIKE ?"; prm.append(f"%{dev.strip()}%")
+    df = read_sql(sql + " ORDER BY id DESC", prm)
+    if df.empty:
+        st.info("رویدادی پیدا نشد.")
+        return
+    ok_n = int((df["event"] == "login").sum()); bad_n = int((df["event"] == "login_failed").sum())
+    st.markdown(f"<div class='legend'><span>{fa(len(df))} رویداد</span><span>✅ {fa(ok_n)} ورود</span>"
+                f"<span>⛔ {fa(bad_n)} ورود ناموفق</span><span>📱 {fa(df['device'].replace('', pd.NA).nunique())} دستگاه</span></div>",
+                unsafe_allow_html=True)
+    out = pd.DataFrame({
+        "زمان": [f"{jdate(a[:10])} {fa(a[11:16])}" for a in df["at"]],
+        "کاربر": df["username"],
+        "منبع": [audit.SOURCE_LABELS.get(s, s) for s in df["source"]],
+        "رویداد": [audit.EVENT_LABELS.get(e, e) for e in df["event"]],
+        "دستگاه": df["device"], "IP": df["ip"], "جزئیات": df["detail"],
+    })
+    st.dataframe(out[out.columns[::-1]], hide_index=True, use_container_width=True, height=560)
+
+
+# ══════════════════════════════════════════════
+# اعلان ثبت‌ها و پیام‌های جدید + بروزرسانی فقط هنگام تغییر داده
+# ══════════════════════════════════════════════
+NOTE_KIND = {"visits": ("📍", "ویزیت جدید", "visit"), "orders": ("📦", "سفارش جدید", "order"),
+             "payments": ("💰", "دریافت جدید", "pay"), "messages": ("💬", "پیام جدید", "visit")}
+
+
+def _new_rows(table, last_id):
+    f, p = _vis_filter("x", ALLOWED)
+    if table == "messages":
+        return read_sql("""SELECT TOP 6 x.id, ISNULL(u.full_name,N'') AS visitor, x.body AS customer,
+                                  CONVERT(VARCHAR(5), x.created_at, 108) AS t, '' AS img, NULL AS amount, '' AS ptype,
+                                  CONVERT(VARCHAR(10), x.created_at, 120) AS d
+                           FROM messages x LEFT JOIN visitors u ON u.id = x.sender_id
+                           WHERE x.id > ? AND x.recipient_id = ? ORDER BY x.id DESC""", (last_id, int(USER["id"])))
+    col = {"visits": ("visit_time", "visit_date", "ISNULL(x.selfie_path,'')", "NULL", "''"),
+           "orders": ("order_time", "order_date", "''", "x.total_amount", "''"),
+           "payments": ("payment_time", "payment_date",
+                        "ISNULL(x.check_image_path, ISNULL(x.transfer_image_path,''))", "x.amount", "x.payment_type")}[table]
+    return read_sql(f"""SELECT TOP 6 x.id, ISNULL(u.full_name,N'') AS visitor,
+                               ISNULL(CAST(c.C_Name AS NVARCHAR(200)), x.customer_code) AS customer,
+                               CONVERT(VARCHAR(5), x.{col[0]}, 108) AS t, {col[2]} AS img, {col[3]} AS amount,
+                               {col[4]} AS ptype, CONVERT(VARCHAR(10), x.{col[1]}, 120) AS d
+                        FROM {table} x
+                        LEFT JOIN visitors u ON u.id = x.visitor_id
+                        LEFT JOIN {SALES}.customer c ON c.C_Code = x.customer_code
+                        WHERE x.id > ? {f} ORDER BY x.id DESC""", (last_id,) + p)
+
+
+def _max_ids():
+    f, p = _vis_filter("x", ALLOWED)
+    out = {}
+    for t in ("visits", "orders", "payments"):
+        out[t] = int(read_sql(f"SELECT ISNULL(MAX(x.id),0) AS m FROM {t} x WHERE 1=1 {f}", p)["m"].iloc[0])
+    out["messages"] = int(read_sql("SELECT ISNULL(MAX(id),0) AS m FROM messages WHERE recipient_id=?",
+                                   (int(USER["id"]),))["m"].iloc[0])
+    return out
+
+
+def _go_messages(sender_name):
+    st.session_state["page"] = PAGES[2]
+    st.session_state["_go_rerun"] = True
+    st.session_state.notes = [n for n in st.session_state.get("notes", []) if n["t"] != "messages"]
+
+
+@st.fragment(run_every=15)
+def live():
+    ss = st.session_state
+    try:
+        cur = _max_ids()
+    except Exception:
+        return
+    if "last_ids" not in ss:
+        ss.last_ids, ss.notes = cur, []
+    data_changed = False
+    for t, mx in cur.items():
+        if mx > ss.last_ids.get(t, 0):
+            if ss.get("notify_on", True):
+                for r in _new_rows(t, ss.last_ids[t]).itertuples():
+                    ss.notes.append({"t": t, "id": int(r.id), "at": time.time(), "visitor": r.visitor,
+                                     "customer": r.customer, "time": r.t, "img": r.img, "amount": r.amount,
+                                     "ptype": r.ptype, "d": r.d})
+            ss.last_ids[t] = mx
+            data_changed = data_changed or t != "messages"
+    ss.notes = [n for n in ss.notes if time.time() - n["at"] < 25][-4:]
+
+    box = st.container(key="pvnotes")
+    for n in ss.notes:
+        icon, title, kind = NOTE_KIND[n["t"]]
+        color, soft = KIND_COLOR[kind], KIND_SOFT[kind]
+        if n["t"] == "payments" and n["ptype"]:
+            title = f"دریافت {n['ptype']}"
+        src = img_src(n["img"], (160, 160)) if n["img"] else None
+        pic = f"<img src='{src}'>" if src else f"<div class='i' style='background:{soft}'>{icon}</div>"
+        amount = f" · {money(n['amount'])}" if n["amount"] is not None and not pd.isna(n["amount"]) and SHOW_MONEY else ""
+        with box.container(key=f"note_{n['t']}_{n['id']}"):
+            st.markdown(
+                f"<div class='pv-note' style='border-right:4px solid {color};padding-right:8px'>{pic}<div>"
+                f"<div class='t' style='color:{color}'>{title}</div>"
+                f"<div class='n'>{esc(n['customer'] if n['t'] != 'messages' else n['visitor'])}</div>"
+                f"<div class='m'>{esc(n['visitor'] if n['t'] != 'messages' else n['customer'][:60])}"
+                f" · ساعت {hhmm(n['time'])}{amount}</div></div></div>", unsafe_allow_html=True)
+            if n["t"] == "messages":
+                st.button("پاسخ ←", key=f"nb_{n['t']}_{n['id']}", on_click=_go_messages, args=(n["visitor"],))
+            else:
+                st.button("نمایش روی نقشه و جزئیات ←", key=f"nb_{n['t']}_{n['id']}",
+                          on_click=open_note, args=(n["t"], n["id"], n["d"]))
+
+    if ss.get("pending_open") or ss.get("_go_rerun"):
+        ss.pop("_go_rerun", None)
+        st.rerun(scope="app")
+    if data_changed and REFRESH.get(ss.get("auto_refresh"), True) and not ss.get("dlg_open"):
+        load_data.clear()
+        st.rerun(scope="app")
+
+
+# ══════════════════════════════════════════════
+# اجرا
+# ══════════════════════════════════════════════
+if page == PAGES[0]:
+    page_map()
+elif page == PAGES[1]:
+    page_report()
+elif page == PAGES[2]:
+    page_messages()
+elif page == PAGES[3] and IS_ADMIN:
+    page_logs()
+
+live()
