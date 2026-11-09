@@ -322,29 +322,31 @@ def load_data(g0: str, g1: str, vids: tuple | None):
         return read_sql(sql.replace("{VF}", f), (g0, g1) + p)
     visits = q(f"""
         SELECT v.id, v.visitor_id, ISNULL(u.full_name, N'نامشخص') AS visitor,
-               v.customer_code, ISNULL(CAST(c.C_Name AS NVARCHAR(200)), v.customer_code) AS customer,
+               v.customer_code, COALESCE(CAST(c.C_Name AS NVARCHAR(200)), nc.name + N' (جدید)', v.customer_code) AS customer,
                v.visit_date AS d, CONVERT(VARCHAR(8), v.visit_time, 108) AS t,
                v.latitude AS lat, v.longitude AS lng, v.gps_accuracy AS acc, v.device,
                ISNULL(v.selfie_path,'') AS selfie, ISNULL(v.description,'') AS descr
         FROM visits v
         LEFT JOIN visitors u ON u.id = v.visitor_id
         LEFT JOIN {SALES}.customer c ON c.C_Code = v.customer_code
+        LEFT JOIN new_customers nc ON nc.code = v.customer_code
         WHERE v.visit_date BETWEEN ? AND ? {{VF}}
         ORDER BY v.visit_date, v.visit_time""", "v")
     orders = q(f"""
         SELECT o.id, o.visitor_id, ISNULL(u.full_name, N'نامشخص') AS visitor,
-               o.customer_code, ISNULL(CAST(c.C_Name AS NVARCHAR(200)), o.customer_code) AS customer,
+               o.customer_code, COALESCE(CAST(c.C_Name AS NVARCHAR(200)), nc.name + N' (جدید)', o.customer_code) AS customer,
                o.order_date AS d, CONVERT(VARCHAR(8), o.order_time, 108) AS t,
                o.latitude AS lat, o.longitude AS lng, o.total_amount AS total,
                ISNULL(o.description,'') AS descr, o.device
         FROM orders o
         LEFT JOIN visitors u ON u.id = o.visitor_id
         LEFT JOIN {SALES}.customer c ON c.C_Code = o.customer_code
+        LEFT JOIN new_customers nc ON nc.code = o.customer_code
         WHERE o.order_date BETWEEN ? AND ? {{VF}}
         ORDER BY o.order_date, o.order_time""", "o")
     pays = q(f"""
         SELECT p.id, p.visitor_id, ISNULL(u.full_name, N'نامشخص') AS visitor,
-               p.customer_code, ISNULL(CAST(c.C_Name AS NVARCHAR(200)), p.customer_code) AS customer,
+               p.customer_code, COALESCE(CAST(c.C_Name AS NVARCHAR(200)), nc.name + N' (جدید)', p.customer_code) AS customer,
                p.payment_date AS d, CONVERT(VARCHAR(8), p.payment_time, 108) AS t,
                p.latitude AS lat, p.longitude AS lng, p.payment_type AS ptype, p.amount,
                ISNULL(p.check_number,'') AS check_number, ISNULL(p.check_sayyadi,'') AS check_sayyadi,
@@ -355,6 +357,7 @@ def load_data(g0: str, g1: str, vids: tuple | None):
         FROM payments p
         LEFT JOIN visitors u ON u.id = p.visitor_id
         LEFT JOIN {SALES}.customer c ON c.C_Code = p.customer_code
+        LEFT JOIN new_customers nc ON nc.code = p.customer_code
         WHERE p.payment_date BETWEEN ? AND ? {{VF}}
         ORDER BY p.payment_date, p.payment_time""", "p")
     items = q(f"""
@@ -804,7 +807,13 @@ def page_map():
                           column_config={"👁": st.column_config.TextColumn("👁", width=36, help="نمایش جزئیات"),
                                          "#": st.column_config.TextColumn("#", width=36),
                                          "ساعت": st.column_config.TextColumn("ساعت", width=52),
-                                         "تاریخ": st.column_config.TextColumn("تاریخ", width=86)})
+                                         "تاریخ": st.column_config.TextColumn("تاریخ", width=86),
+                                         # نام‌های بلند کوتاه نمایش داده می‌شوند تا ستون 👁 بیرون نزند
+                                         "مشتری": st.column_config.TextColumn("مشتری", width=130),
+                                         "ویزیتور": st.column_config.TextColumn("ویزیتور", width=78),
+                                         "مبلغ": st.column_config.TextColumn("مبلغ", width=98),
+                                         "شماره": st.column_config.TextColumn("شماره", width=50),
+                                         "نوع": st.column_config.TextColumn("نوع", width=52)})
         cells = ev.selection.cells if ev and ev.selection else []
         if not cells:
             return None, None
@@ -1493,12 +1502,13 @@ def _new_rows(table, last_id):
            "payments": ("payment_time", "payment_date",
                         "ISNULL(x.check_image_path, ISNULL(x.transfer_image_path,''))", "x.amount", "x.payment_type")}[table]
     return read_sql(f"""SELECT TOP 6 x.id, ISNULL(u.full_name,N'') AS visitor,
-                               ISNULL(CAST(c.C_Name AS NVARCHAR(200)), x.customer_code) AS customer,
+                               COALESCE(CAST(c.C_Name AS NVARCHAR(200)), nc.name + N' (جدید)', x.customer_code) AS customer,
                                CONVERT(VARCHAR(5), x.{col[0]}, 108) AS t, {col[2]} AS img, {col[3]} AS amount,
                                {col[4]} AS ptype, CONVERT(VARCHAR(10), x.{col[1]}, 120) AS d
                         FROM {table} x
                         LEFT JOIN visitors u ON u.id = x.visitor_id
                         LEFT JOIN {SALES}.customer c ON c.C_Code = x.customer_code
+                        LEFT JOIN new_customers nc ON nc.code = x.customer_code
                         WHERE x.id > ? {f} ORDER BY x.id DESC""", (last_id,) + p)
 
 

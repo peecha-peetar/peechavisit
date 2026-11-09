@@ -53,7 +53,8 @@
 
     <!-- ── مشتری و حضور ── -->
     <section class="card card-always" id="section-base">
-        <h2 class="card-title">مشتری</h2>
+        <h2 class="card-title card-title-row">مشتری
+            <button type="button" class="btn-link" onclick="openNewCustomer()">➕ مشتری جدید</button></h2>
 
         <div class="picker" id="customer-picker">
             <div class="picker-field">
@@ -212,6 +213,42 @@
         <a href="https://peecha.ir" target="_blank">peecha.ir</a> · پیچا ویزیت ۱۴۰۵
     </footer>
 </main>
+
+<!-- ── ثبت مشتری جدید (فقط در دیتابیس پیچا ویزیت، نه نرم‌افزار فروش) ── -->
+<div class="report-view" id="nc-view" hidden>
+    <header class="app-header">
+        <button type="button" class="icon-btn" onclick="closeNewCustomer()">بازگشت</button>
+        <div class="header-text">
+            <h1>مشتری جدید</h1>
+            <p>ثبت اطلاعات مشتری و ادامهٔ ویزیت و سفارش</p>
+        </div>
+    </header>
+    <main class="container">
+        <section class="card card-always">
+            <label class="field-label" for="nc-name">نام مشتری / فروشگاه <span class="req">*</span></label>
+            <input type="text" id="nc-name" autocomplete="off" maxlength="200" placeholder="مثلاً سوپرمارکت امید">
+            <label class="field-label" for="nc-contact">نام مسئول یا صاحب فروشگاه</label>
+            <input type="text" id="nc-contact" autocomplete="off" maxlength="100">
+            <div class="row2">
+                <div><label class="field-label" for="nc-mobile">موبایل <span class="req">*</span></label>
+                     <input type="tel" id="nc-mobile" inputmode="tel" dir="ltr" maxlength="20" placeholder="09xxxxxxxxx"></div>
+                <div><label class="field-label" for="nc-phone">تلفن ثابت</label>
+                     <input type="tel" id="nc-phone" inputmode="tel" dir="ltr" maxlength="20"></div>
+            </div>
+            <label class="field-label" for="nc-city">شهر / منطقه</label>
+            <input type="text" id="nc-city" autocomplete="off" maxlength="60">
+            <label class="field-label" for="nc-address">آدرس</label>
+            <textarea id="nc-address" rows="2" maxlength="400"></textarea>
+            <label class="field-label" for="nc-nid">کد ملی / شناسهٔ ملی (اختیاری)</label>
+            <input type="text" id="nc-nid" inputmode="numeric" dir="ltr" maxlength="20">
+            <label class="field-label" for="nc-desc">توضیحات</label>
+            <textarea id="nc-desc" rows="2" maxlength="400" placeholder="اختیاری"></textarea>
+            <label class="check-row"><input type="checkbox" id="nc-geo" checked> ثبت موقعیت فعلی به‌عنوان محل مشتری</label>
+            <div class="hint">این مشتری فقط در سامانهٔ پیچا ویزیت ثبت می‌شود (نه در نرم‌افزار فروش) و با کد موقت شروع‌شونده با N شناخته می‌شود.</div>
+            <button type="button" class="btn btn-primary" id="nc-save" onclick="saveNewCustomer()">ثبت مشتری جدید</button>
+        </section>
+    </main>
+</div>
 
 <!-- ── گزارش کار من (روی صفحه باز می‌شود؛ آفلاین هم صف ارسال را نشان می‌دهد) ── -->
 <div class="report-view" id="report-view" hidden>

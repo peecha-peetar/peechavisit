@@ -1,7 +1,7 @@
 // sw.js - Service Worker پیچا ویزیت | آفلاین-First v2.0
 'use strict';
 
-const CACHE_NAME  = 'pv-shell-v10';
+const CACHE_NAME  = 'pv-shell-v11';
 const API_PREFIX  = '/api/';
 
 // فایل‌هایی که باید cache بشن (app shell)

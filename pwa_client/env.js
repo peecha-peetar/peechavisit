@@ -87,7 +87,7 @@ if (PV_IS_APP && window.PeechaNative) {
             const headers = init.headers instanceof Headers
                 ? Object.fromEntries(init.headers.entries()) : (init.headers || {});
             window.PeechaNative.request(id, (init.method || 'GET').toUpperCase(), url.href,
-                JSON.stringify(headers), init.body == null ? '' : String(init.body), 30000);
+                JSON.stringify(headers), init.body == null ? '' : String(init.body), init.pvTimeout || 30000);
         });
     };
 }

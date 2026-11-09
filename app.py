@@ -311,6 +311,21 @@ def sync_data():
                     for r in cur.fetchall()]
 
         cur.close(); conn.close()
+
+        # مشتریان جدیدِ ثبت‌شده در اپ (فقط tracking) — برای ثبت ویزیت و سفارش بعدی
+        step = 'خواندن مشتریان جدید'
+        try:
+            conn = get_conn(); cur = conn.cursor()
+            cur.execute("""SELECT code, name, ISNULL(latitude,0), ISNULL(longitude,0), ISNULL(phone,''),
+                                  ISNULL(mobile,''), ISNULL(address,''), visitor_id
+                           FROM new_customers WHERE status <> 'rejected' ORDER BY id""")
+            known = {c["code"] for c in customers}
+            customers += [{"code": r[0], "name": r[1], "lat": float(r[2]), "lng": float(r[3]), "is_new": True,
+                           "phone": r[4], "mobile": r[5], "address": r[6], "mine": r[7] == request.current_user['visitor_id']}
+                          for r in cur.fetchall() if r[0] not in known]
+            cur.close(); conn.close()
+        except Exception as e:
+            print(f"⚠️ new customers: {e}")
         print(f"✅ sync-data | {len(customers)} مشتری | {len(articles)} کالا")
         log('sync', f"{len(customers)} مشتری، {len(articles)} کالا")
         return jsonify({"status":"success",
@@ -325,6 +340,111 @@ def sync_data():
 # ══════════════════════════════════════════
 # ۲-ب. گزارش کار خود ویزیتور — نیاز به token
 # ══════════════════════════════════════════
+# ══════════════════════════════════════════
+# مشتری جدید (فقط در tracking) + نام مشتری/کالا برای گزارش‌ها
+# ══════════════════════════════════════════
+NEW_CODE_RE = re.compile(r'^N[0-9A-Z]{4,9}$')
+
+
+def save_new_customer(cur, nc, visitor_id):
+    """ثبت مشتری جدید اگر هنوز ثبت نشده (کد را خود اپ می‌سازد تا آفلاین هم کار کند).
+    خروجی: کد مشتری یا None"""
+    if not isinstance(nc, dict):
+        return None
+    code = str(nc.get('code') or '').strip().upper()
+    name = str(nc.get('name') or '').strip()
+    if not NEW_CODE_RE.match(code) or not name:
+        return None
+    cut = lambda k, n: (str(nc.get(k) or '').strip()[:n] or None)
+    def num(k):
+        try:
+            return float(nc.get(k)) if nc.get(k) not in (None, '') else None
+        except (TypeError, ValueError):
+            return None
+    cur.execute("SELECT 1 FROM new_customers WHERE code=?", (code,))
+    if cur.fetchone():
+        return code
+    cur.execute("""INSERT INTO new_customers (code, name, contact, phone, mobile, city, address, national_id,
+                                              description, latitude, longitude, visitor_id, device)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (code, name[:200], cut('contact', 100), cut('phone', 40), cut('mobile', 40), cut('city', 60),
+                 cut('address', 400), cut('national_id', 20), cut('description', 400),
+                 num('latitude'), num('longitude'), visitor_id, (client_device() or '')[:200] or None))
+    log('new_customer', f"{code} — {name[:80]}")
+    return code
+
+
+def _chunks(seq, n=400):
+    seq = list(seq)
+    for i in range(0, len(seq), n):
+        yield seq[i:i + n]
+
+
+def customer_names(codes) -> dict:
+    """نام مشتری‌ها با یک پرس‌وجو برای هر ۴۰۰ کد (بدون JOIN ردیف‌به‌ردیف بین دو دیتابیس → سریع)"""
+    codes = {str(c).strip() for c in codes if c}
+    out = {}
+    if not codes:
+        return out
+    new = [c for c in codes if c.startswith('N')]
+    try:
+        conn = get_conn(); cur = conn.cursor()
+        for part in _chunks(new):
+            cur.execute(f"SELECT code, name FROM new_customers WHERE code IN ({','.join('?' * len(part))})", part)
+            out.update({r[0]: f"{r[1]} (جدید)" for r in cur.fetchall()})
+        cur.close(); conn.close()
+    except Exception as e:
+        print(f"⚠️ new customer names: {e}")
+    rest = [c for c in codes if c not in out]
+    if rest:
+        try:
+            conn = get_conn(SALES_DB); cur = conn.cursor()
+            for part in _chunks(rest):
+                cur.execute(f"""SELECT CAST(C_Code AS NVARCHAR(50)), CAST(C_Name AS NVARCHAR(200)) FROM customer
+                                WHERE C_Code IN ({','.join(['CAST(? AS VARCHAR(50))'] * len(part))})""", part)
+                out.update({(r[0] or '').strip(): fa_text(r[1]) for r in cur.fetchall()})
+            cur.close(); conn.close()
+        except Exception as e:
+            print(f"⚠️ customer names: {e}")
+    return out
+
+
+def article_names(codes) -> dict:
+    codes = {str(c).strip() for c in codes if c}
+    out = {}
+    if not codes:
+        return out
+    try:
+        conn = get_conn(SALES_DB); cur = conn.cursor()
+        for part in _chunks(codes):
+            cur.execute(f"""SELECT CAST(A_Code AS NVARCHAR(50)), CAST(A_Name AS NVARCHAR(200)) FROM article
+                            WHERE A_Code IN ({','.join(['CAST(? AS VARCHAR(50))'] * len(part))})""", part)
+            out.update({(r[0] or '').strip(): fa_text(r[1]) for r in cur.fetchall()})
+        cur.close(); conn.close()
+    except Exception as e:
+        print(f"⚠️ article names: {e}")
+    return out
+
+
+@app.route('/api/new-customer', methods=['POST'])
+@require_auth
+def new_customer():
+    data = request.json or {}
+    vid = request.current_user['visitor_id']
+    if not str(data.get('name') or '').strip():
+        return jsonify({"status": "error", "message": "نام مشتری الزامی است"}), 400
+    try:
+        conn = get_conn(); cur = conn.cursor()
+        code = save_new_customer(cur, data, vid)
+        conn.commit(); cur.close(); conn.close()
+    except Exception as e:
+        print(f"❌ new-customer error: {e}")
+        return jsonify({"status": "error", "message": "ثبت مشتری در سرور ممکن نشد"}), 500
+    if not code:
+        return jsonify({"status": "error", "message": "اطلاعات مشتری نامعتبر است"}), 400
+    return jsonify({"status": "success", "code": code, "message": "مشتری جدید ثبت شد"}), 200
+
+
 @app.route('/api/my-report', methods=['GET'])
 @require_auth
 def my_report():
@@ -339,20 +459,18 @@ def my_report():
         return jsonify({"status":"error","message":"بازهٔ گزارش حداکثر یک سال است"}), 400
     try:
         conn = get_conn(); cur = conn.cursor()
-        cust = f"[{SALES_DB}].dbo.customer"
-        art = f"[{SALES_DB}].dbo.article"
         cur.execute(f"""
             SELECT v.id, v.visit_date, CONVERT(VARCHAR(5), v.visit_time, 108), v.customer_code,
-                   CAST(c.C_Name AS NVARCHAR(200)), ISNULL(v.description,''), ISNULL(v.selfie_path,'')
-            FROM visits v LEFT JOIN {cust} c ON c.C_Code = v.customer_code
+                   NULL, ISNULL(v.description,''), ISNULL(v.selfie_path,'')
+            FROM visits v
             WHERE v.visitor_id=? AND v.visit_date BETWEEN ? AND ?
             ORDER BY v.visit_date DESC, v.visit_time DESC""", (vid, d0, d1))
         visits = [{"id": r[0], "date": str(r[1]), "time": r[2], "customer_code": r[3],
                    "customer": fa_text(r[4]) or r[3], "description": r[5], "selfie": r[6]} for r in cur.fetchall()]
         cur.execute(f"""
             SELECT o.id, o.order_date, CONVERT(VARCHAR(5), o.order_time, 108), o.customer_code,
-                   CAST(c.C_Name AS NVARCHAR(200)), o.total_amount, ISNULL(o.description,'')
-            FROM orders o LEFT JOIN {cust} c ON c.C_Code = o.customer_code
+                   NULL, o.total_amount, ISNULL(o.description,'')
+            FROM orders o
             WHERE o.visitor_id=? AND o.order_date BETWEEN ? AND ?
             ORDER BY o.order_date DESC, o.order_time DESC""", (vid, d0, d1))
         orders = [{"id": r[0], "date": str(r[1]), "time": r[2], "customer_code": r[3],
@@ -361,10 +479,9 @@ def my_report():
         by_id = {o["id"]: o for o in orders}
         if orders:
             cur.execute(f"""
-                SELECT oi.order_id, oi.article_code, CAST(a.A_Name AS NVARCHAR(200)),
+                SELECT oi.order_id, oi.article_code, NULL,
                        CAST(oi.quantity AS FLOAT), CAST(oi.price AS FLOAT)
                 FROM order_items oi JOIN orders o ON o.id = oi.order_id
-                LEFT JOIN {art} a ON a.A_Code = oi.article_code
                 WHERE o.visitor_id=? AND o.order_date BETWEEN ? AND ?
                 ORDER BY oi.order_id, oi.id""", (vid, d0, d1))
             for r in cur.fetchall():
@@ -375,12 +492,12 @@ def my_report():
             o["items"] = len(o["lines"])
         cur.execute(f"""
             SELECT p.id, p.payment_date, CONVERT(VARCHAR(5), p.payment_time, 108), p.customer_code,
-                   CAST(c.C_Name AS NVARCHAR(200)), p.payment_type, p.amount,
+                   NULL, p.payment_type, p.amount,
                    ISNULL(p.check_number,''), ISNULL(p.check_sayyadi,''), p.check_due_date,
                    ISNULL(p.check_image_path,''), ISNULL(p.transfer_account,''),
                    ISNULL(p.transfer_tracking,''), ISNULL(p.transfer_image_path,''),
                    ISNULL(p.tracking_number,''), ISNULL(p.description,'')
-            FROM payments p LEFT JOIN {cust} c ON c.C_Code = p.customer_code
+            FROM payments p
             WHERE p.visitor_id=? AND p.payment_date BETWEEN ? AND ?
             ORDER BY p.payment_date DESC, p.payment_time DESC""", (vid, d0, d1))
         pays = [{"id": r[0], "date": str(r[1]), "time": r[2], "customer_code": r[3],
@@ -396,6 +513,14 @@ def my_report():
                            UNION ALL SELECT MAX(payment_date) FROM payments WHERE visitor_id=?) t""", (vid, vid, vid))
         last = cur.fetchone()[0]
         cur.close(); conn.close()
+        # نام مشتری‌ها و کالاها جدا و یک‌جا (سریع، حتی با دیتابیس فروش بزرگ)
+        cn = customer_names({x["customer_code"] for x in visits + orders + pays})
+        for x in visits + orders + pays:
+            x["customer"] = cn.get(str(x["customer_code"]).strip()) or x["customer"]
+        an = article_names({l["code"] for o in orders for l in o["lines"]})
+        for o in orders:
+            for l in o["lines"]:
+                l["name"] = an.get(str(l["code"]).strip()) or l["name"]
         log('report', f"{d0} تا {d1}")
         return jsonify({"status":"success", "from": str(d0), "to": str(d1), "last_date": str(last) if last else None,
                         "visits": visits, "orders": orders, "payments": pays}), 200
@@ -571,6 +696,7 @@ def submit_visit():
             return jsonify({"status":"error","message":"موقعیت GPS الزامی است"}), 400
 
         conn = get_conn(); cur = conn.cursor()
+        save_new_customer(cur, data.get('new_customer'), visitor_id)   # مشتری جدید (اگر آفلاین ثبت شده)
 
         if is_uid_done(cur, uid):
             cur.close(); conn.close()
@@ -649,6 +775,7 @@ def submit_order():
         total = sum(float(i.get('qty',0)) * float(i.get('price',0)) for i in items)
 
         conn = get_conn(); cur = conn.cursor()
+        save_new_customer(cur, data.get('new_customer'), visitor_id)   # مشتری جدید (اگر آفلاین ثبت شده)
 
         if is_uid_done(cur, order_uid):
             cur.close(); conn.close()
@@ -724,6 +851,7 @@ def submit_payment():
         tr_img_b64     = pay_info.get('transfer_image', '')
 
         conn = get_conn(); cur = conn.cursor()
+        save_new_customer(cur, data.get('new_customer'), visitor_id)   # مشتری جدید (اگر آفلاین ثبت شده)
 
         if is_uid_done(cur, pay_uid):
             cur.close(); conn.close()
@@ -780,6 +908,22 @@ def submit_payment():
     except Exception as e:
         print(f"submit-payment error: {e}")
         return jsonify({"status":"error","message":"خطای سرور"}), 500
+
+
+# پاسخ خطا همیشه JSON (تا اپ پیام دقیق نشان دهد، نه «اتصال برقرار نشد»)
+@app.errorhandler(404)
+def _not_found(e):
+    return jsonify({"status": "error", "message": "این بخش در نسخهٔ سرور وجود ندارد — سرور را به‌روز کنید"}), 404
+
+
+@app.errorhandler(405)
+def _bad_method(e):
+    return jsonify({"status": "error", "message": "درخواست نامعتبر"}), 405
+
+
+@app.errorhandler(500)
+def _server_error(e):
+    return jsonify({"status": "error", "message": "خطای داخلی سرور"}), 500
 
 
 if __name__ == '__main__':

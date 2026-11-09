@@ -3,6 +3,8 @@
 # مدیریت کاربران، تنظیمات سامانه و وضعیت سرویس‌ها
 # اجرا:  streamlit run admin.py --server.port 8502
 # ════════════════════════════════════════════════
+import io
+import os
 import ipaddress
 import re
 import secrets
@@ -90,6 +92,13 @@ ADMIN = require_admin("پنل مدیریت پیچا", "🛠️")
 # ══════════════════════════════════════════════
 # توابع کمکی
 # ══════════════════════════════════════════════
+def RESTART_NOTE(msg: str) -> str:
+    """زیر برنامهٔ اصلی (start.bat جدید / سرویس ویندوز) ری‌استارت خودکار است"""
+    if os.environ.get("PEECHA_PARENT"):
+        return msg.split(".")[0] + ". سرویس‌ها ظرف چند ثانیه خودکار دوباره شروع می‌شوند."
+    return msg
+
+
 def flash(msg: str, kind: str = "success"):
     """پیامی که بعد از rerun نمایش داده می‌شود"""
     st.session_state["_flash"] = (kind, msg)
@@ -157,6 +166,11 @@ def ensure_cols():
 @st.cache_resource
 def _ensure_once():
     ensure_cols()
+    try:
+        import audit
+        audit.ensure_schema()      # جدول‌های پیام، لاگ و مشتری جدید
+    except Exception:
+        pass
     return True
 
 
@@ -236,8 +250,13 @@ except Exception as e:
     st.info("از تب «وضعیت سیستم» یا فایل config.py تنظیمات اتصال را بررسی کنید.")
     users_df = pd.DataFrame()
 
-tab_users, tab_new, tab_cfg, tab_sys = st.tabs([
-    f"👥 کاربران ({len(users_df)})", "➕ کاربر جدید", "⚙️ تنظیمات", "🩺 وضعیت سیستم",
+try:
+    _nc_new = int(scalar("SELECT COUNT(*) FROM new_customers WHERE status='new'") or 0)
+except Exception:
+    _nc_new = 0
+tab_users, tab_new, tab_nc, tab_cfg, tab_sys = st.tabs([
+    f"👥 کاربران ({len(users_df)})", "➕ کاربر جدید",
+    f"🆕 مشتریان جدید{f' ({_nc_new})' if _nc_new else ''}", "⚙️ تنظیمات", "🩺 وضعیت سیستم",
 ])
 
 
@@ -500,6 +519,91 @@ with tab_new:
 
 
 # ══════════════════════════════════════════════
+# تب — مشتریان جدیدِ ثبت‌شده در اپ (فقط در tracking)
+# ══════════════════════════════════════════════
+NC_STATUS = {"new": "🆕 جدید — بررسی نشده", "done": "✅ در نرم‌افزار فروش تعریف شد", "rejected": "⛔ رد شده (در اپ نمی‌آید)"}
+
+with tab_nc:
+    st.markdown("<div class='sec-s'>مشتریانی که ویزیتورها در اپ ثبت کرده‌اند. این مشتری‌ها فقط در دیتابیس پیچا ویزیت هستند "
+                "و در نرم‌افزار فروش ثبت نشده‌اند؛ ویزیت و سفارش آن‌ها با کد موقت (شروع با N) ذخیره می‌شود. "
+                "بعد از تعریف در نرم‌افزار فروش، کد آن‌جا را این‌جا وارد کنید.</div>", unsafe_allow_html=True)
+    try:
+        conn = get_conn()
+        ncs = pd.read_sql("""
+            SELECT n.id, n.code, n.name, ISNULL(n.contact,'') AS contact, ISNULL(n.mobile,'') AS mobile,
+                   ISNULL(n.phone,'') AS phone, ISNULL(n.city,'') AS city, ISNULL(n.address,'') AS address,
+                   ISNULL(n.national_id,'') AS national_id, ISNULL(n.description,'') AS description,
+                   n.latitude, n.longitude, n.status, ISNULL(n.sales_code,'') AS sales_code, n.created_at,
+                   ISNULL(u.full_name, N'نامشخص') AS visitor,
+                   (SELECT COUNT(*) FROM orders o WHERE o.customer_code = n.code) AS n_orders,
+                   (SELECT ISNULL(SUM(o.total_amount),0) FROM orders o WHERE o.customer_code = n.code) AS s_orders,
+                   (SELECT COUNT(*) FROM visits v WHERE v.customer_code = n.code) AS n_visits
+            FROM new_customers n LEFT JOIN visitors u ON u.id = n.visitor_id
+            ORDER BY n.id DESC""", conn)
+        conn.close()
+    except Exception as e:
+        ncs = None
+        st.error(f"❌ خواندن مشتریان جدید ممکن نشد: {e}")
+    if ncs is not None and ncs.empty:
+        st.info("هنوز مشتری جدیدی از اپ ثبت نشده است. ویزیتور در اپ از دکمهٔ «➕ مشتری جدید» کنار انتخاب مشتری استفاده می‌کند.")
+    elif ncs is not None:
+        f1, f2 = st.columns([1, 2])
+        f_st = f1.selectbox("وضعیت", ["همه"] + list(NC_STATUS), format_func=lambda s: s if s == "همه" else NC_STATUS[s],
+                            key="nc_f_status")
+        f_q = f2.text_input("جستجو", placeholder="نام، موبایل، کد یا ویزیتور", key="nc_f_q")
+        view = ncs if f_st == "همه" else ncs[ncs["status"] == f_st]
+        if f_q.strip():
+            q = f_q.strip()
+            view = view[view.apply(lambda r: any(q in str(r[c]) for c in ("name", "mobile", "phone", "code", "visitor", "contact")), axis=1)]
+        table = pd.DataFrame({
+            "کد موقت": view["code"], "نام مشتری": view["name"], "مسئول": view["contact"], "موبایل": view["mobile"],
+            "تلفن": view["phone"], "شهر": view["city"], "آدرس": view["address"], "ثبت توسط": view["visitor"],
+            "تاریخ ثبت": view["created_at"].apply(to_jalali),
+            "ویزیت": view["n_visits"], "سفارش": view["n_orders"], "جمع سفارش (ریال)": view["s_orders"].map(lambda v: f"{v:,.0f}"),
+            "وضعیت": view["status"].map(lambda s: NC_STATUS.get(s, s)), "کد در نرم‌افزار فروش": view["sales_code"],
+        })
+        st.dataframe(table[table.columns[::-1]], hide_index=True, width="stretch", height=min(460, 38 + 35 * len(table)))
+        buf = io.BytesIO()
+        table.to_excel(buf, index=False, sheet_name="New customers")
+        st.download_button("📥 Excel مشتریان جدید", buf.getvalue(), file_name="PeechaVisit_New_Customers.xlsx")
+
+        st.markdown("<div class='sec-t' style='margin-top:12px'>✏️ بررسی و ویرایش</div>", unsafe_allow_html=True)
+        pick = st.selectbox("مشتری", list(view["id"]), key="nc_pick",
+                            format_func=lambda i: (lambda r: f"{r['name']} — {r['code']} — {r['visitor']}")(view[view['id'] == i].iloc[0]))
+        if pick is not None:
+            r = view[view["id"] == pick].iloc[0]
+            if r["latitude"] and r["longitude"]:
+                st.markdown(f"📍 [موقعیت روی نقشه](https://www.google.com/maps?q={r['latitude']},{r['longitude']})")
+            with st.form(f"nc_form_{pick}"):
+                c1, c2 = st.columns(2)
+                e_name = c1.text_input("نام مشتری", r["name"])
+                e_contact = c2.text_input("مسئول", r["contact"])
+                e_mobile = c1.text_input("موبایل", r["mobile"])
+                e_phone = c2.text_input("تلفن", r["phone"])
+                e_city = c1.text_input("شهر", r["city"])
+                e_nid = c2.text_input("کد/شناسهٔ ملی", r["national_id"])
+                e_addr = st.text_area("آدرس", r["address"], height=70)
+                e_desc = st.text_area("توضیحات", r["description"], height=70)
+                c3, c4 = st.columns(2)
+                e_status = c3.selectbox("وضعیت", list(NC_STATUS), index=list(NC_STATUS).index(r["status"]) if r["status"] in NC_STATUS else 0,
+                                        format_func=lambda s: NC_STATUS[s])
+                e_sales = c4.text_input("کد در نرم‌افزار فروش (بعد از تعریف)", r["sales_code"])
+                ok_nc = st.form_submit_button("💾 ذخیره", type="primary")
+            if ok_nc:
+                if not e_name.strip():
+                    st.error("نام مشتری خالی است.")
+                else:
+                    run_sql("""UPDATE new_customers SET name=?, contact=?, mobile=?, phone=?, city=?, national_id=?,
+                               address=?, description=?, status=?, sales_code=? WHERE id=?""",
+                            (e_name.strip()[:200], e_contact.strip()[:100] or None, e_mobile.strip()[:40] or None,
+                             e_phone.strip()[:40] or None, e_city.strip()[:60] or None, e_nid.strip()[:20] or None,
+                             e_addr.strip()[:400] or None, e_desc.strip()[:400] or None, e_status,
+                             e_sales.strip()[:50] or None, int(pick)))
+                    flash(f"✅ اطلاعات «{e_name.strip()}» ذخیره شد.")
+                    st.rerun()
+
+
+# ══════════════════════════════════════════════
 # تب ۳ — تنظیمات
 # ══════════════════════════════════════════════
 def _valid_host(h: str) -> bool:
@@ -516,8 +620,12 @@ with tab_cfg:
     live = ("MOBILE", "GPS")     # این‌ها بدون ری‌استارت اعمال می‌شوند
     loaded = {s: getattr(config, s) for s in DEFAULTS if s not in live}
     if {s: v for s, v in cur_cfg.items() if s not in live} != loaded:
-        st.warning("⚠️ تنظیمات ذخیره‌شده با تنظیمات در حال اجرا فرق دارد. "
-                   "برای اعمال، سرویس‌ها (app.py، داشبورد و این پنل) را ری‌استارت کنید.")
+        if os.environ.get("PEECHA_PARENT"):
+            st.info("🔄 تنظیمات تازه ذخیره شده است؛ سرویس‌ها ظرف چند ثانیه خودکار دوباره شروع می‌شوند "
+                    "و این صفحه دوباره وصل می‌شود.")
+        else:
+            st.warning("⚠️ تنظیمات ذخیره‌شده با تنظیمات در حال اجرا فرق دارد. "
+                       "برای اعمال، پنجرهٔ سرویس‌ها را ببندید و start.bat را دوباره اجرا کنید.")
     if SECURITY["SESSION_SECRET"] == INSECURE_SECRET:
         st.error("🔑 کلید امنیتی توکن‌ها هنوز مقدار پیش‌فرض است و هر کسی کد را دارد می‌تواند توکن جعل کند. "
                  "پایین همین صفحه «ساخت کلید جدید» را بزنید.")
@@ -636,7 +744,7 @@ with tab_cfg:
                 "APP": {"NAME": s_name.strip(), "NAME_EN": s_name_en.strip(), "WEBSITE": s_web.strip(),
                         "PRIMARY_COLOR": s_c1, "ACCENT_COLOR": s_c2},
             })
-            flash("✅ تنظیمات ذخیره شد. برای اعمال، سرویس‌ها را ری‌استارت کنید.")
+            flash(RESTART_NOTE("✅ تنظیمات ذخیره شد. برای اعمال، سرویس‌ها را ری‌استارت کنید."))
             st.rerun()
 
     st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
@@ -648,7 +756,7 @@ with tab_cfg:
                         unsafe_allow_html=True)
             if st.button("🔑 ساخت کلید جدید", width="stretch"):
                 config.save_settings({"SECURITY": {"SESSION_SECRET": secrets.token_hex(32)}})
-                flash("✅ کلید جدید ساخته شد. app.py را ری‌استارت کنید.")
+                flash(RESTART_NOTE("✅ کلید جدید ساخته شد. app.py را ری‌استارت کنید."))
                 st.rerun()
     with k2:
         with st.container(border=True):
@@ -660,7 +768,7 @@ with tab_cfg:
                 st.write("همهٔ مقادیر به config.py برمی‌گردند (کلید امنیتی هم).")
                 if st.button("بله، بازگردانی شود", type="primary"):
                     config.reset_settings()
-                    flash("✅ تنظیمات به پیش‌فرض برگشت. سرویس‌ها را ری‌استارت کنید.")
+                    flash(RESTART_NOTE("✅ تنظیمات به پیش‌فرض برگشت. سرویس‌ها را ری‌استارت کنید."))
                     st.rerun()
 
 

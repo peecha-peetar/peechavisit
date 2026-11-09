@@ -75,13 +75,18 @@ def _watch_parent():
 # سرویس‌ها
 # ══════════════════════════════════════════
 def run_api():
-    from waitress import serve
     from config import NETWORK
     import app as api
     port = int(NETWORK.get("FLASK_PORT", 5000))
+    host = NETWORK.get("FLASK_HOST", "0.0.0.0")
     _say(f"API روی پورت {port}")
-    serve(api.app, host=NETWORK.get("FLASK_HOST", "0.0.0.0"), port=port,
-          threads=16, ident="PeechaVisit", max_request_body_size=64 * 1024 * 1024)
+    try:
+        from waitress import serve
+    except ImportError:                  # setup.bat هنوز اجرا نشده: سرور سادهٔ Flask
+        _say("⚠️ waitress نصب نیست (setup.bat را دوباره اجرا کنید) — اجرای API با سرور Flask")
+        api.app.run(host=host, port=port, threaded=True)
+        return
+    serve(api.app, host=host, port=port, threads=16, ident="PeechaVisit", max_request_body_size=64 * 1024 * 1024)
 
 
 def run_pwa():
@@ -185,6 +190,20 @@ def _open_log(service):
     return open(path, "ab", buffering=0)
 
 
+# تنظیماتی که فقط با شروع دوبارهٔ سرویس‌ها اعمال می‌شوند (اپ موبایل و GPS زنده‌اند)
+RESTART_SECTIONS = ("NETWORK", "DATABASES", "SECURITY", "APP", "PATHS")
+
+
+def _restart_signature():
+    import json
+    import config
+    try:
+        cur = config.current_settings()
+        return json.dumps({k: cur.get(k) for k in RESTART_SECTIONS}, sort_keys=True, ensure_ascii=False)
+    except Exception:
+        return None
+
+
 def supervise(only=None):
     _ensure_secret()
     wanted = only or SERVICES
@@ -223,9 +242,30 @@ def supervise(only=None):
     _say(f"پیچا ویزیت شروع شد — پوشهٔ داده: {paths.DATA_DIR}")
     for s in wanted:
         start(s)
+    sig = _restart_signature()
+
+    def restart_all():
+        _say("🔄 تنظیمات دیتابیس/شبکه/امنیت تغییر کرد — شروع دوبارهٔ سرویس‌ها")
+        time.sleep(2)                    # تا پنل مدیریت پیام ذخیره را نشان دهد
+        for p in procs.values():
+            if p.poll() is None:
+                p.terminate()
+        for p in procs.values():
+            try:
+                p.wait(10)
+            except subprocess.TimeoutExpired:
+                p.kill()
+        for s in wanted:
+            start(s)
+
     try:
         while not stopping.is_set():
             time.sleep(2)
+            now_sig = _restart_signature()
+            if now_sig is not None and sig is not None and now_sig != sig:
+                sig = now_sig
+                restart_all()
+                continue
             for s in wanted:
                 p = procs[s]
                 if p.poll() is not None and not stopping.is_set():

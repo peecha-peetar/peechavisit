@@ -40,12 +40,34 @@ _TABLES = {
             created_at  DATETIME       NOT NULL DEFAULT GETDATE()
         );
         CREATE INDEX IX_access_log_time ON access_log (created_at);""",
+    # مشتری جدیدی که ویزیتور در اپ ثبت می‌کند — فقط در tracking (نه در دیتابیس فروش)
+    "new_customers": """
+        CREATE TABLE new_customers (
+            id           INT IDENTITY(1,1) PRIMARY KEY,
+            code         VARCHAR(10)    NOT NULL UNIQUE,
+            name         NVARCHAR(200)  NOT NULL,
+            contact      NVARCHAR(100)  NULL,
+            phone        NVARCHAR(40)   NULL,
+            mobile       NVARCHAR(40)   NULL,
+            city         NVARCHAR(60)   NULL,
+            address      NVARCHAR(400)  NULL,
+            national_id  NVARCHAR(20)   NULL,
+            description  NVARCHAR(400)  NULL,
+            latitude     FLOAT          NULL,
+            longitude    FLOAT          NULL,
+            visitor_id   INT            NOT NULL,
+            device       NVARCHAR(200)  NULL,
+            status       VARCHAR(12)    NOT NULL DEFAULT 'new',
+            sales_code   VARCHAR(50)    NULL,
+            created_at   DATETIME       NOT NULL DEFAULT GETDATE()
+        );""",
 }
 
 EVENT_LABELS = {
     "login": "ورود", "login_failed": "ورود ناموفق", "sync": "دریافت لیست‌ها",
     "visit": "ثبت ویزیت", "order": "ثبت سفارش", "payment": "ثبت دریافت",
     "report": "مشاهدهٔ گزارش", "message": "ارسال پیام", "logout": "خروج",
+    "new_customer": "ثبت مشتری جدید",
 }
 SOURCE_LABELS = {"app": "اپ موبایل", "dashboard": "داشبورد", "admin": "پنل مدیریت"}
 

@@ -73,10 +73,12 @@ function apiFetch(endpoint, options = {}) {
 
     const token = getToken();
     const ctrl = new AbortController();
-    const tid  = setTimeout(() => ctrl.abort(), 15000); // 15s timeout
+    const wait = options.timeout || 15000;               // پیش‌فرض ۱۵ ثانیه؛ گزارش بیشتر
+    const tid  = setTimeout(() => ctrl.abort(), wait);
 
     return fetch(`${API}${endpoint}`, {
         ...options,
+        pvTimeout: wait + 2000,
         signal: ctrl.signal,
         headers: {
             'Content-Type': 'application/json',
@@ -315,9 +317,9 @@ function makePicker({ root, hidden, items, label, sub, onSelect, emptyText }) {
 
 const customerPicker = makePicker({
     root: 'customer-picker', hidden: 'main-customer-select',
-    items: () => allCustomersRaw,
+    items: () => allCustomers(),
     label: c => c.name || c.code,
-    sub: c => `کد ${escHtml(c.code)}`,
+    sub: c => c.is_new ? `<span class="new-tag">مشتری جدید</span> ${escHtml(c.mobile || c.phone || '')}` : `کد ${escHtml(c.code)}`,
     emptyText: 'لیست مشتریان هنوز دریافت نشده — «همگام‌سازی» را بزنید',
 });
 
@@ -371,6 +373,8 @@ function fetchServerData() {
             tx.objectStore("cached_data").put({ type:"articles",  list:d.articles  });
             tx.objectStore("cached_data").put({ type:"settings",  list:d.settings || {} });
             applyRules(d.settings);
+            markServerCustomers(d.customers);
+            pushPendingCustomers();
             customerPicker.refresh();
             setListPlaceholders();
         }).catch(err => {
@@ -391,6 +395,110 @@ function loadCache() {
     s.get("articles").onsuccess = e => {
         if (e.target.result) { allArticlesRaw = e.target.result.list; setListPlaceholders(); }
     };
+}
+
+// ══════════════════════════════════════════
+// مشتری جدید — فقط در دیتابیس tracking ثبت می‌شود (نه دیتابیس فروش)
+// ──────────────────────────────────────────
+// کد موقت (N...) در خود گوشی ساخته می‌شود تا آفلاین هم بشود برایش ویزیت و سفارش ثبت کرد؛
+// اطلاعات مشتری همراه هر ثبت هم فرستاده می‌شود تا سرور آن را قبل از سفارش بسازد.
+// ══════════════════════════════════════════
+const NC_KEY = 'pv_new_customers_v1';
+let newCustomers = (() => { try { return JSON.parse(localStorage.getItem(NC_KEY)) || []; } catch { return []; } })();
+const saveNC = () => { try { localStorage.setItem(NC_KEY, JSON.stringify(newCustomers)); } catch { } };
+
+function allCustomers() {
+    const known = new Set(allCustomersRaw.map(c => String(c.code)));
+    return [...newCustomers.filter(c => !known.has(c.code)).map(c => ({ ...c, is_new: true })), ...allCustomersRaw];
+}
+function localNewCustomer(code) {
+    const c = newCustomers.find(x => x.code === code);
+    if (!c) return null;
+    const { synced, ...data } = c;
+    return data;
+}
+function newCustomerCode() {
+    const t = Date.now().toString(36).toUpperCase().slice(-7);
+    const r = Math.random().toString(36).toUpperCase().slice(2, 4).padEnd(2, '0');
+    return 'N' + t + r;              // ۱۰ کاراکتر (اندازهٔ ستون کد مشتری)
+}
+function markServerCustomers(list) {
+    const codes = new Set((list || []).filter(c => c.is_new).map(c => c.code));
+    let ch = false;
+    newCustomers.forEach(c => { if (codes.has(c.code) && !c.synced) { c.synced = true; ch = true; } });
+    // مشتری‌هایی که روی سرور هستند دیگر لازم نیست در گوشی نگه داشته شوند
+    const before = newCustomers.length;
+    newCustomers = newCustomers.filter(c => !(c.synced && codes.has(c.code)));
+    if (ch || before !== newCustomers.length) saveNC();
+}
+async function pushPendingCustomers() {
+    if (!navigator.onLine) return;
+    for (const c of newCustomers.filter(x => !x.synced)) {
+        try {
+            const r = await apiFetch('/new-customer', { method: 'POST', body: JSON.stringify(localNewCustomer(c.code)) });
+            const d = await r.json();
+            if (d.status === 'success') { c.synced = true; saveNC(); }
+        } catch (e) { if (e.message === 'TOKEN_EXPIRED') return; }
+    }
+}
+
+function openNewCustomer() {
+    const v = document.getElementById('nc-view');
+    ['nc-name','nc-contact','nc-mobile','nc-phone','nc-city','nc-address','nc-nid','nc-desc']
+        .forEach(id => { document.getElementById(id).value = ''; });
+    const q = document.getElementById('customer-search').value.trim();
+    if (q && !document.getElementById('main-customer-select').value) document.getElementById('nc-name').value = q;
+    document.getElementById('nc-geo').checked = true;
+    v.hidden = false; history.pushState({ pvNC: 1 }, '');
+    setTimeout(() => document.getElementById('nc-name').focus(), 50);
+}
+function closeNewCustomer() {
+    if (history.state && history.state.pvNC) history.back();
+    else document.getElementById('nc-view').hidden = true;
+}
+window.addEventListener('popstate', () => { document.getElementById('nc-view').hidden = true; });
+
+function quickPosition() {
+    return new Promise(res => {
+        if (!navigator.geolocation) { res(null); return; }
+        navigator.geolocation.getCurrentPosition(p => res(p.coords), () => res(null),
+            { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 });
+    });
+}
+async function saveNewCustomer() {
+    const val = id => document.getElementById(id).value.trim();
+    const name = val('nc-name'), mobile = toLatinDigits(val('nc-mobile')), phone = toLatinDigits(val('nc-phone'));
+    if (name.length < 2) { alert('⚠️ نام مشتری (یا فروشگاه) را وارد کنید.'); return; }
+    if (!mobile && !phone) { alert('⚠️ دست‌کم یک شمارهٔ تماس (موبایل یا تلفن) وارد کنید.'); return; }
+    if (mobile && !/^0?9\d{9}$/.test(mobile.replace(/[\s-]/g, ''))) { alert('⚠️ شمارهٔ موبایل معتبر نیست (مثل ۰۹۱۲۳۴۵۶۷۸۹).'); return; }
+    const dup = allCustomers().find(c => normFa(c.name) === normFa(name));
+    if (dup && !(await pvConfirm(`مشتری دیگری با نام «${dup.name}» وجود دارد. باز هم مشتری جدید ثبت شود؟`, 'ثبت', 'انصراف'))) return;
+    const btn = document.getElementById('nc-save');
+    btn.disabled = true; btn.textContent = '⏳ در حال ثبت...';
+    const pos = document.getElementById('nc-geo').checked ? await quickPosition() : null;
+    const c = {
+        code: newCustomerCode(), name, contact: val('nc-contact'), mobile, phone,
+        city: val('nc-city'), address: val('nc-address'), national_id: toLatinDigits(val('nc-nid')),
+        description: val('nc-desc'),
+        latitude: pos ? pos.latitude : null, longitude: pos ? pos.longitude : null,
+        created: new Date().toISOString(), synced: false,
+    };
+    newCustomers.push(c); saveNC();
+    let online = false;
+    if (navigator.onLine) {
+        try {
+            const r = await apiFetch('/new-customer', { method: 'POST', body: JSON.stringify(localNewCustomer(c.code)) });
+            const d = await r.json();
+            if (d.status === 'success') { c.synced = true; saveNC(); online = true; }
+            else alert('⚠️ ' + (d.message || 'ثبت در سرور ناموفق بود') + '\nمشتری روی گوشی ذخیره شد و بعداً ارسال می‌شود.');
+        } catch (e) { if (e.message === 'TOKEN_EXPIRED') return; }
+    }
+    btn.disabled = false; btn.textContent = 'ثبت مشتری جدید';
+    closeNewCustomer();
+    customerPicker.refresh();
+    customerPicker.select({ ...c, is_new: true });
+    alert((online ? '✅ مشتری جدید در سرور ثبت شد.' : '📴 مشتری جدید روی گوشی ذخیره شد و با اتصال ارسال می‌شود.')
+          + '\nحالا می‌توانید برای او ویزیت، سفارش یا دریافت ثبت کنید.');
 }
 
 // ══════════════════════════════════════════
@@ -700,7 +808,8 @@ function submitIntegratedForm() {
             client_time: now.toTimeString().slice(0,8),
             order_items: currentMode==="order" ? [...orderBasket] : [],
             order_note: currentMode==="order" ? document.getElementById("order-note").value.trim() : "",
-            payment_info: currentMode==="pay" ? buildPaymentInfo() : null
+            payment_info: currentMode==="pay" ? buildPaymentInfo() : null,
+            new_customer: localNewCustomer(customerCode)   // اگر مشتری جدید است (برای ثبت آفلاین)
         };
 
         saveQueue(payload, () => {
@@ -975,7 +1084,7 @@ function renderQueue() {
         document.getElementById('rep-queue-n').style.background = recs.length ? '' : '#adb5bd';
         document.getElementById('rep-send').style.display = recs.length ? '' : 'none';
         document.getElementById('rep-queue').innerHTML = recs.map(r => {
-            const c = allCustomersRaw.find(x => String(x.code) === String(r.customer_code));
+            const c = allCustomers().find(x => String(x.code) === String(r.customer_code));
             const amount = r.mode === 'order' ? (r.order_items || []).reduce((t, i) => t + i.qty * i.price, 0)
                          : r.mode === 'pay' && r.payment_info ? r.payment_info.amount : null;
             return `<div class="rep-row">
@@ -1094,8 +1203,8 @@ function loadReport() {
     };
     if (!navigator.onLine) { fromCache('حالت آفلاین', true); return; }
     document.getElementById('rep-stamp').textContent = 'در حال دریافت گزارش...';
-    apiFetch(`/my-report?from=${from}&to=${to}`)
-        .then(r => r.json())
+    apiFetch(`/my-report?from=${from}&to=${to}`, { timeout: 60000 })
+        .then(r => r.json().catch(() => ({ status: 'error', message: `پاسخ نامعتبر از سرور (کد ${r.status}) — نسخهٔ سرور را به‌روز کنید` })))
         .then(d => {
             if (range !== repRange) return;
             if (d.status !== 'success') { fromCache(d.message || 'دریافت گزارش ناموفق بود', true); return; }
@@ -1112,7 +1221,11 @@ function loadReport() {
                 repAlert('هنوز هیچ ویزیت، سفارش یا دریافتی با این حساب کاربری در سرور ثبت نشده است.');
             }
         })
-        .catch(err => { if (err.message !== 'TOKEN_EXPIRED') fromCache('اتصال به سرور برقرار نشد', true); });
+        .catch(err => {
+            if (err.message === 'TOKEN_EXPIRED') return;
+            fromCache(err.message === 'TIMEOUT' ? 'سرور در ۶۰ ثانیه گزارش را آماده نکرد (بازهٔ کوچک‌تری انتخاب کنید)'
+                                                : 'اتصال به سرور برقرار نشد', true);
+        });
 }
 
 // ══════════════════════════════════════════

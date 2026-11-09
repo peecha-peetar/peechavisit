@@ -13,14 +13,13 @@ REM close windows left from a previous start, so old code never keeps running
 taskkill /FI "WINDOWTITLE eq PeechaVisit*" /T /F >nul 2>&1
 timeout /t 2 >nul
 
-start "PeechaVisit API - port 5000" cmd /k .venv\Scripts\python.exe app.py
-start "PeechaVisit Web App - port 8000" cmd /k .venv\Scripts\python.exe run_client.py
-start "PeechaVisit Dashboard - port 8501" cmd /k .venv\Scripts\python.exe -m streamlit run dashboard.py --server.port 8501
-start "PeechaVisit Admin - port 8502" cmd /k .venv\Scripts\python.exe -m streamlit run admin.py --server.port 8502
+REM one window runs everything (API, web app, dashboard, admin panel); a crashed part restarts,
+REM and changing database/network settings in the admin panel restarts all parts automatically
+start "PeechaVisit Server - do not close" cmd /k .venv\Scripts\python.exe peecha_server.py
 
 echo.
 echo ===============================================
-echo   4 windows were opened. Do NOT close them.
+echo   The "PeechaVisit Server" window was opened. Do NOT close it.
 echo.
 echo   Dashboard : http://localhost:8501
 echo   Admin     : http://localhost:8502

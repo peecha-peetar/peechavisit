@@ -80,6 +80,15 @@ button, input, select, textarea { font-family: inherit; }
     background: var(--warn-soft); border: 1px solid #f5d48a; color: #6b4a00; }
 .rep-alert[hidden] { display: none; }
 .rep-custom[hidden] { display: none; }
+.card-title-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.btn-link { border: 0; background: var(--primary-soft); color: var(--primary); font: inherit; font-size: 13px; font-weight: 700;
+    border-radius: 10px; padding: 6px 10px; cursor: pointer; }
+.btn-link:active { filter: brightness(.95); }
+.new-tag { display: inline-block; font-size: 11px; font-weight: 700; color: #b35c00; background: var(--warn-soft);
+    border-radius: 8px; padding: 0 6px; }
+.req { color: var(--danger); }
+.check-row { display: flex; align-items: center; gap: 8px; margin: 12px 0 6px; font-size: 14px; }
+.check-row input { width: 20px; height: 20px; }
 .rep-alert.err { background: #fdecec; border-color: #f3b7b7; color: #a61b1b; }
 .rep-alert .btn { margin-top: 8px; }
 #rep-range .menu-btn { font-size: 13px; padding: 9px 2px; }
