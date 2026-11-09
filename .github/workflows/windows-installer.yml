@@ -74,15 +74,36 @@ jobs:
           if (-not $ok) { throw "services did not start" }
           "SMOKE OK"
 
+      # WinSW یک بار دانلود و در کش نگه داشته می‌شود (دانلود از گیت‌هاب گاهی 504 می‌دهد)
+      - name: Cache WinSW
+        id: winsw-cache
+        uses: actions/cache@v4
+        with:
+          path: packaging/winsw
+          key: winsw-v2.12.0-x64
+
       - name: Download WinSW
+        if: steps.winsw-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force packaging\winsw | Out-Null
-          # دانلود با تلاش دوباره (خطای موقت شبکه/گیت‌هاب نباید ساخت را خراب کند)
-          for ($i = 1; $i -le 5; $i++) {
-            try { Invoke-WebRequest $env:WINSW_URL -OutFile packaging\winsw\PeechaVisitService.exe; break }
-            catch { if ($i -eq 5) { throw }; "download failed ($i): $($_.Exception.Message) — retrying"; Start-Sleep (10 * $i) }
+          $urls = @(
+            $env:WINSW_URL,
+            'https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe',
+            'https://github.com/winsw/winsw/releases/download/v2.11.0/WinSW-x64.exe',
+            'https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-net461.exe'
+          )
+          $ok = $false
+          foreach ($u in $urls) {
+            for ($i = 1; $i -le 4 -and -not $ok; $i++) {
+              try {
+                Invoke-WebRequest $u -OutFile packaging\winsw\PeechaVisitService.exe -TimeoutSec 120
+                if ((Get-Item packaging\winsw\PeechaVisitService.exe).Length -gt 100000) { $ok = $true; "downloaded: $u" }
+              } catch { "download failed ($u, try $i): $($_.Exception.Message)"; Start-Sleep (8 * $i) }
+            }
+            if ($ok) { break }
           }
+          if (-not $ok) { throw "WinSW could not be downloaded" }
 
       - name: Build installer (Inno Setup)
         shell: pwsh
