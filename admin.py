@@ -730,8 +730,9 @@ with tab_cfg:
                 c_tbl = k1.text_input("جدول عکس‌ها", C.get("IMAGE_TABLE") or "",
                                       help="خالی = استفاده از ستونی در جدول article")
                 c_mode = k2.radio("روش ذخیرهٔ عکس", list(MODES), format_func=MODES.get, horizontal=False,
-                                  index=list(MODES).index(C.get("IMAGE_MODE") or "path") if (C.get("IMAGE_MODE") or "path") in MODES else 0)
-                c_type = k3.text_input("فقط Type =", C.get("IMAGE_TYPE") or "", help="خالی = همهٔ ردیف‌ها")
+                                  index=list(MODES).index(C.get("IMAGE_MODE") or "auto") if (C.get("IMAGE_MODE") or "auto") in MODES else 2)
+                c_type = k3.text_input("فقط Type =", C.get("IMAGE_TYPE") if C.get("IMAGE_TYPE") is not None else "1",
+                                       help="۱ = عکس کالا، ۲ = عکس مشتری (طرف حساب)؛ خالی = همهٔ ردیف‌ها")
                 k4, k5, k6 = st.columns(3)
                 c_code = k4.text_input("ستون کد کالا", C.get("IMAGE_CODE_COL") or "Code")
                 c_path = k5.text_input("ستون مسیر", C.get("IMAGE_PATH_COL") or "PicturePath")
@@ -751,6 +752,8 @@ with tab_cfg:
                     import catalog as _cat
                     st.caption(f"منبع: {_cat.source_text()} · کالاهای دارای عکس: {len(_cat.has_image_values())}")
                     if c_test.strip():
+                        for line in _cat.diagnose(c_test.strip()):
+                            st.caption(line)
                         img = _cat.thumbnail(c_test.strip(), 300)
                         if img:
                             st.image(img, caption=f"عکس کالای {c_test.strip()}", width=220)

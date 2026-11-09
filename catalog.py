@@ -53,11 +53,11 @@ def table_mode():
         _cache[key] = hit
     if not hit[1]:
         return None
-    mode = (s.get("IMAGE_MODE") or "path").strip().lower()
+    mode = (s.get("IMAGE_MODE") or "auto").strip().lower()
     return {"table": t, "code": cols["IMAGE_CODE_COL"],
             "path": cols["IMAGE_PATH_COL"] if _ident(cols["IMAGE_PATH_COL"]) else None,
             "blob": cols["IMAGE_BLOB_COL"] if _ident(cols["IMAGE_BLOB_COL"]) else None,
-            "mode": mode if mode in ("path", "db", "auto") else "path",
+            "mode": mode if mode in ("path", "db", "auto") else "auto",
             "type": (s.get("IMAGE_TYPE") or "").strip()}
 
 
@@ -258,4 +258,35 @@ def thumbnail(code: str, size: int) -> bytes | None:
         for k in [k for k in _cache if k[0] == "img"][:300]:
             _cache.pop(k, None)
     _cache[key] = (time.time(), out)
+    return out
+
+
+def diagnose(code: str) -> list[str]:
+    """برای پنل مدیریت: چرا عکس یک کالا پیدا می‌شود یا نمی‌شود"""
+    out = [f"منبع: {source_text()}"]
+    tm = table_mode()
+    if not tm:
+        col = image_column()
+        out.append(f"جدول عکس پیدا نشد؛ ستون article: {col or 'ندارد'}")
+        return out
+    try:
+        conn = get_conn(_sales_db()); cur = conn.cursor()
+        blob = f"DATALENGTH([{tm['blob']}])" if tm["blob"] else "0"
+        path = f"[{tm['path']}]" if tm["path"] else "NULL"
+        cur.execute(f"SELECT [Type], {path}, {blob} FROM [{tm['table']}] WHERE [{tm['code']}] = CAST(? AS VARCHAR(50))",
+                    (str(code).strip(),))
+        rows = cur.fetchall()
+        cur.close(); conn.close()
+    except Exception as e:
+        return out + [f"❌ خواندن جدول عکس: {e}"]
+    if not rows:
+        return out + [f"ردیفی با کد «{code}» در جدول {tm['table']} نیست."]
+    for t, p, n in rows:
+        used = "✔ استفاده می‌شود" if (not tm["type"] or str(t) == tm["type"]) else f"✘ کنار گذاشته شد (فیلتر Type = {tm['type']})"
+        if p:
+            rp = _resolve(str(p))
+            ptxt = f"مسیر «{p}» — {'فایل روی همین سرور پیدا شد' if rp else 'فایل روی این کامپیوتر (سرور پیچا ویزیت) پیدا نشد'}"
+        else:
+            ptxt = "مسیر خالی"
+        out.append(f"Type={t} · {ptxt} · عکس داخل دیتابیس: {f'{n:,} بایت' if n else 'ندارد'} · {used}")
     return out

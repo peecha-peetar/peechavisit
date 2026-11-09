@@ -38,7 +38,7 @@ DATABASES = {
 APP = {
     "NAME":          "پیچا ویزیت",
     "NAME_EN":       "PeechaVisit",
-    "VERSION":       "3.3.1",
+    "VERSION":       "3.3.2",
     "WEBSITE":       "https://peecha.ir",
     "PRIMARY_COLOR": "#020025",
     "ACCENT_COLOR":  "#4f6ef7",
@@ -89,8 +89,8 @@ CATALOG = {
     "IMAGE_CODE_COL": "Code",          # کد کالا در جدول عکس
     "IMAGE_PATH_COL": "PicturePath",   # مسیر فایل عکس
     "IMAGE_BLOB_COL": "Picture",       # خود عکس داخل دیتابیس (نوع image)
-    "IMAGE_MODE":     "path",          # path = مسیر فایل · db = داخل دیتابیس · auto = مسیر، وگرنه دیتابیس
-    "IMAGE_TYPE":     "",              # فقط ردیف‌هایی با این مقدار Type (خالی = همه)
+    "IMAGE_MODE":     "auto",          # path = مسیر فایل · db = داخل دیتابیس · auto = مسیر، وگرنه دیتابیس
+    "IMAGE_TYPE":     "1",             # Type در جدول عکس: ۱ = کالا، ۲ = مشتری (خالی = همه)
     "IMAGE_COLUMN":   "",              # حالت ستون article: ستون مسیر عکس (خالی = تشخیص خودکار)
     "IMAGE_DIR":      "",              # پوشهٔ پایه برای مسیرهای نسبی یا فقط نام فایل
 }
