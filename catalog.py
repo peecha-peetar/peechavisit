@@ -1,6 +1,6 @@
 # catalog.py - پیچا ویزیت | عکس کالا از دیتابیس فروش (برای اپ: هنگام سفارش و کاتالوگ)
 # ════════════════════════════════════════════════
-# روش ۱ — جدول جدای عکس‌ها (پیش‌فرض HLOpicturs: Code, Picture, PicturePath, Type):
+# روش ۱ — جدول جدای عکس‌ها (HLOPictures: Code, Picture, PicturePath, Type — ۱ = کالا، ۲ = مشتری):
 #   IMAGE_MODE = path → فایل از مسیر PicturePath · db → خود عکس از ستون Picture · auto → مسیر، وگرنه دیتابیس
 # روش ۲ — اگر آن جدول نباشد: ستون عکس جدول article از تنظیمات (CATALOG.IMAGE_COLUMN)؛ اگر خالی باشد
 # ستونی با نامی شبیه Pic / Image / Img / Photo / Aks / Path پیدا می‌شود.
@@ -31,34 +31,57 @@ def _sales_db():
 _ident = lambda s: bool(s) and re.fullmatch(r"[A-Za-z0-9_]+", s) is not None
 
 
-def table_mode():
-    """تنظیمات جدول عکس اگر جدول در دیتابیس فروش وجود دارد، وگرنه None"""
+def _find_table(want: str):
+    """نام واقعی جدول عکس: همان نام تنظیم‌شده (بدون حساسیت به حروف) یا جدولی که ستون‌های کد، مسیر و عکس را دارد"""
     s = _settings()
-    t = (s.get("IMAGE_TABLE") or "").strip()
+    code_c = (s.get("IMAGE_CODE_COL") or "Code").strip()
+    blob_c = (s.get("IMAGE_BLOB_COL") or "Picture").strip()
+    path_c = (s.get("IMAGE_PATH_COL") or "PicturePath").strip()
+    conn = get_conn(_sales_db()); cur = conn.cursor()
+    try:
+        if want:
+            cur.execute("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE LOWER(TABLE_NAME) = LOWER(?)", (want,))
+            r = cur.fetchone()
+            if r:
+                return r[0]
+        cur.execute("""SELECT TABLE_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                       WHERE LOWER(COLUMN_NAME) IN (LOWER(?), LOWER(?), LOWER(?)) AND TABLE_NAME <> 'article'
+                       GROUP BY TABLE_NAME HAVING COUNT(DISTINCT LOWER(COLUMN_NAME)) = 3
+                       ORDER BY CASE WHEN TABLE_NAME LIKE '%pict%' THEN 0 ELSE 1 END, TABLE_NAME""",
+                    (code_c, blob_c, path_c))
+        r = cur.fetchone()
+        return r[0] if r else None
+    finally:
+        cur.close(); conn.close()
+
+
+def table_mode(kind: str = "article"):
+    """تنظیمات جدول عکس (اگر در دیتابیس فروش هست)، وگرنه None — kind: article / customer"""
+    s = _settings()
+    want = (s.get("IMAGE_TABLE") or "").strip()
     cols = {k: (s.get(k) or "").strip() for k in ("IMAGE_CODE_COL", "IMAGE_PATH_COL", "IMAGE_BLOB_COL")}
-    if not _ident(t) or not _ident(cols["IMAGE_CODE_COL"]):
+    if not _ident(cols["IMAGE_CODE_COL"]):
         return None
-    key = ("tbl", _sales_db(), t)
+    key = ("tbl", _sales_db(), want, repr(sorted(cols.items())))
     hit = _cache.get(key)
     if not (hit and time.time() - hit[0] < 120):
-        exists = False
+        name = None
         try:
-            conn = get_conn(_sales_db()); cur = conn.cursor()
-            cur.execute("SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME=?", (t,))
-            exists = cur.fetchone()[0] > 0
-            cur.close(); conn.close()
+            name = _find_table(want)
         except Exception as e:
             print(f"⚠️ image table: {e}")
-        hit = (time.time(), exists)
+        hit = (time.time(), name)
         _cache[key] = hit
-    if not hit[1]:
+    t = hit[1]
+    if not t or not _ident(t):
         return None
     mode = (s.get("IMAGE_MODE") or "auto").strip().lower()
+    typ = (s.get("CUSTOMER_TYPE") if kind == "customer" else s.get("IMAGE_TYPE")) or ""
     return {"table": t, "code": cols["IMAGE_CODE_COL"],
             "path": cols["IMAGE_PATH_COL"] if _ident(cols["IMAGE_PATH_COL"]) else None,
             "blob": cols["IMAGE_BLOB_COL"] if _ident(cols["IMAGE_BLOB_COL"]) else None,
             "mode": mode if mode in ("path", "db", "auto") else "auto",
-            "type": (s.get("IMAGE_TYPE") or "").strip()}
+            "type": str(typ).strip(), "kind": kind}
 
 
 def _tbl_filters(tm):
@@ -126,9 +149,9 @@ def image_column():
     return col
 
 
-def has_image_values():
-    """{کد کالا: True} برای کالاهایی که مقدار عکس دارند"""
-    tm = table_mode()
+def has_image_values(kind: str = "article"):
+    """{کد: True} برای کالاها (یا مشتری‌ها) که عکس دارند"""
+    tm = table_mode(kind)
     if tm:
         key = ("has", _sales_db(), repr(sorted(tm.items())))
         hit = _cache.get(key)
@@ -145,6 +168,8 @@ def has_image_values():
             print(f"⚠️ image list (table): {e}")
         _cache[key] = (time.time(), out)
         return out
+    if kind != "article":
+        return {}
     col = image_column()
     if not col:
         return {}
@@ -212,11 +237,13 @@ def _table_image(tm, code):
         cur.close(); conn.close()
 
 
-def image_bytes(code: str):
-    """عکس اصلی یک کالا (bytes) یا None"""
-    tm = table_mode()
+def image_bytes(code: str, kind: str = "article"):
+    """عکس اصلی یک کالا یا مشتری (bytes) یا None"""
+    tm = table_mode(kind)
     if tm:
         return _table_image(tm, code)
+    if kind != "article":
+        return None
     col = image_column()
     if not col:
         return None
@@ -236,15 +263,15 @@ def image_bytes(code: str):
         return f.read()
 
 
-def thumbnail(code: str, size: int) -> bytes | None:
+def thumbnail(code: str, size: int, kind: str = "article") -> bytes | None:
     """عکس کوچک‌شده (JPEG) — در حافظه نگه داشته می‌شود"""
     size = max(80, min(int(size or 320), 1200))
     s = _settings()
-    key = ("img", _sales_db(), str(code), size, repr(sorted(s.items())))
+    key = ("img", _sales_db(), kind, str(code), size, repr(sorted(s.items())))
     hit = _cache.get(key)
     if hit and time.time() - hit[0] < (600 if hit[1] else 30):    # «بدون عکس» فقط ۳۰ ثانیه
         return hit[1]
-    raw = image_bytes(code)
+    raw = image_bytes(code, kind)
     out = None
     if raw:
         from PIL import Image
@@ -261,10 +288,10 @@ def thumbnail(code: str, size: int) -> bytes | None:
     return out
 
 
-def diagnose(code: str) -> list[str]:
-    """برای پنل مدیریت: چرا عکس یک کالا پیدا می‌شود یا نمی‌شود"""
+def diagnose(code: str, kind: str = "article") -> list[str]:
+    """برای پنل مدیریت: چرا عکس یک کالا (یا مشتری) پیدا می‌شود یا نمی‌شود"""
     out = [f"منبع: {source_text()}"]
-    tm = table_mode()
+    tm = table_mode(kind)
     if not tm:
         col = image_column()
         out.append(f"جدول عکس پیدا نشد؛ ستون article: {col or 'ندارد'}")

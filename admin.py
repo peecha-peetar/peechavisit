@@ -731,8 +731,10 @@ with tab_cfg:
                                       help="خالی = استفاده از ستونی در جدول article")
                 c_mode = k2.radio("روش ذخیرهٔ عکس", list(MODES), format_func=MODES.get, horizontal=False,
                                   index=list(MODES).index(C.get("IMAGE_MODE") or "auto") if (C.get("IMAGE_MODE") or "auto") in MODES else 2)
-                c_type = k3.text_input("فقط Type =", C.get("IMAGE_TYPE") if C.get("IMAGE_TYPE") is not None else "1",
-                                       help="۱ = عکس کالا، ۲ = عکس مشتری (طرف حساب)؛ خالی = همهٔ ردیف‌ها")
+                c_type = k3.text_input("Type عکس کالا", C.get("IMAGE_TYPE") if C.get("IMAGE_TYPE") is not None else "1",
+                                       help="۱ = عکس کالا؛ خالی = همهٔ ردیف‌ها")
+                c_ctype = k3.text_input("Type عکس مشتری", C.get("CUSTOMER_TYPE") if C.get("CUSTOMER_TYPE") is not None else "2",
+                                        help="۲ = عکس طرف حساب (پروفایل مشتری در اپ و داشبورد)")
                 k4, k5, k6 = st.columns(3)
                 c_code = k4.text_input("ستون کد کالا", C.get("IMAGE_CODE_COL") or "Code")
                 c_path = k5.text_input("ستون مسیر", C.get("IMAGE_PATH_COL") or "PicturePath")
@@ -742,15 +744,26 @@ with tab_cfg:
                 c_col = st.text_input("حالت ستون article: نام ستون (خالی = تشخیص خودکار)", C.get("IMAGE_COLUMN") or "")
                 k7, k8 = st.columns([2, 1])
                 c_test = k7.text_input("آزمون: کد یک کالا", placeholder="مثلاً 0701001")
+                c_ctest = k7.text_input("آزمون: کد یک مشتری", placeholder="مثلاً 00003")
                 save_cat = k8.form_submit_button("💾 ذخیره و آزمون", type="primary")
             if save_cat:
                 config.save_settings({"CATALOG": {
                     "IMAGE_TABLE": c_tbl.strip(), "IMAGE_MODE": c_mode, "IMAGE_TYPE": c_type.strip(),
+                    "CUSTOMER_TYPE": c_ctype.strip(),
                     "IMAGE_CODE_COL": c_code.strip(), "IMAGE_PATH_COL": c_path.strip(), "IMAGE_BLOB_COL": c_blob.strip(),
                     "IMAGE_DIR": c_dir.strip(), "IMAGE_COLUMN": c_col.strip()}})
                 try:
                     import catalog as _cat
-                    st.caption(f"منبع: {_cat.source_text()} · کالاهای دارای عکس: {len(_cat.has_image_values())}")
+                    st.caption(f"منبع: {_cat.source_text()} · کالاهای دارای عکس: {len(_cat.has_image_values('article'))}"
+                               f" · مشتریان دارای عکس: {len(_cat.has_image_values('customer'))}")
+                    if c_ctest.strip():
+                        for line in _cat.diagnose(c_ctest.strip(), "customer"):
+                            st.caption(line)
+                        cimg = _cat.thumbnail(c_ctest.strip(), 300, "customer")
+                        if cimg:
+                            st.image(cimg, caption=f"عکس مشتری {c_ctest.strip()}", width=160)
+                        else:
+                            st.warning("برای این مشتری عکسی پیدا نشد.")
                     if c_test.strip():
                         for line in _cat.diagnose(c_test.strip()):
                             st.caption(line)

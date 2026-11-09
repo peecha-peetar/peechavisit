@@ -324,10 +324,15 @@ def sync_data():
                     for r in cur.fetchall()]
         # کدام کالاها عکس دارند (عکس جدا و فقط وقتی لازم است گرفته می‌شود)
         step = 'عکس کالاها'
-        with_img = catalog.has_image_values()
+        with_img = catalog.has_image_values("article")
         for a in articles:
             if with_img.get(a["code"]):
                 a["img"] = True
+        step = 'عکس مشتری‌ها'
+        with_cimg = catalog.has_image_values("customer")
+        for c in customers:
+            if with_cimg.get(c["code"]):
+                c["img"] = True
 
         cur.close(); conn.close()
 
@@ -577,10 +582,21 @@ def my_report():
                         "message": f"دریافت گزارش از سرور ممکن نشد — مرحله: {step} — {str(e)[:220]}"}), 500
 
 
+@app.route('/api/customer-image', methods=['GET'])
+@require_auth
+def customer_image():
+    """عکس طرف حساب (مشتری) از جدول عکس‌های نرم‌افزار فروش — پروفایل مشتری در اپ"""
+    return _image_response('customer')
+
+
 @app.route('/api/article-image', methods=['GET'])
 @require_auth
 def article_image():
     """عکس کالا از دیتابیس فروش (کوچک‌شده، data URL) — برای سفارش‌گیری و کاتالوگ اپ"""
+    return _image_response('article')
+
+
+def _image_response(kind):
     code = (request.args.get('code') or '').strip()
     try:
         size = int(request.args.get('s', 320))
@@ -589,12 +605,12 @@ def article_image():
     if not code:
         return jsonify({"status": "error", "message": "کد کالا لازم است"}), 400
     try:
-        data = catalog.thumbnail(code, size)
+        data = catalog.thumbnail(code, size, kind)
     except Exception as e:
-        print(f"⚠️ article-image {code}: {e}")
-        return jsonify({"status": "error", "message": "خواندن عکس کالا ممکن نشد"}), 500
+        print(f"⚠️ {kind}-image {code}: {e}")
+        return jsonify({"status": "error", "message": "خواندن عکس ممکن نشد"}), 500
     if not data:
-        return jsonify({"status": "error", "message": "این کالا عکس ندارد"}), 404
+        return jsonify({"status": "error", "message": "عکسی ثبت نشده است"}), 404
     return jsonify({"status": "success", "data": "data:image/jpeg;base64," + base64.b64encode(data).decode('ascii')}), 200
 
 

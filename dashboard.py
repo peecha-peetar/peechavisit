@@ -80,6 +80,10 @@ body:has([data-testid="stDialog"]) [data-testid="stPopoverBody"] { display:none 
 .dh .time b { display:block; font-size:30px; font-weight:900; line-height:1.1; letter-spacing:.5px; }
 .dh .time small { font-size:12px; color:#495057; }
 .dh .who { flex:1; min-width:0; }
+.dh .cphoto { width:76px; height:76px; border-radius:50%; object-fit:cover; flex:none; border:3px solid #fff;
+  box-shadow:0 4px 14px rgba(16,24,40,.15); cursor:zoom-in; }
+.dh .cphoto.none { display:flex; align-items:center; justify-content:center; background:#fff; color:#868e96;
+  font-size:28px; font-weight:800; cursor:default; }
 .dh .kind { display:inline-block; border-radius:20px; padding:2px 12px; font-size:12px; font-weight:800; color:#fff; }
 .dh .name { font-size:20px; font-weight:800; color:#17202e; margin:4px 0 2px; }
 .dh .amount { font-size:20px; font-weight:900; }
@@ -597,6 +601,25 @@ def pay_html(p) -> str:
 
 
 KIND_LABEL = {"visit": "ویزیت", "order": "سفارش", "pay": "دریافت"}
+
+
+@st.cache_data(ttl=600, show_spinner=False, max_entries=2000)
+def customer_photo(code: str) -> str | None:
+    """عکس طرف حساب از جدول عکس‌های نرم‌افزار فروش (Type مشتری) — data URL"""
+    try:
+        import catalog
+        data = catalog.thumbnail(str(code).strip(), 240, "customer")
+    except Exception:
+        return None
+    return "data:image/jpeg;base64," + base64.b64encode(data).decode("ascii") if data else None
+
+
+def customer_photo_html(code, name) -> str:
+    src = customer_photo(str(code))
+    if src:
+        return (f"<a href='{src}' target='_blank' title='عکس طرف حساب'>"
+                f"<img class='cphoto' src='{src}' alt=''></a>")
+    return f"<div class='cphoto none'>{esc((str(name) or '؟').strip()[:1])}</div>"
 NC_STATUS = {"new": "جدید — بررسی نشده", "done": "در نرم‌افزار فروش تعریف شد", "rejected": "رد شده"}
 
 
@@ -663,6 +686,7 @@ def detail_dialog(stop_by_n, items_by_order):
         st.markdown(
             f"<div class='dh' style='background:{soft};border:1px solid {color}33'>"
             f"<div class='time' style='color:{color}'><b>{hhmm(s['t'])}</b><small>{jweekday(s['d'])} {jdate(s['d'])}</small></div>"
+            f"{customer_photo_html(s['customer_code'], s['customer'])}"
             f"<div class='who'><span class='kind' style='background:{color}'>{fa(n)} · {KIND_LABEL[focus]}</span>"
             f"<div class='name'>{esc(title)}</div>{amount}"
             f"<div class='chips'>{''.join(f'<span>{c}</span>' for c in chips)}</div></div></div>",

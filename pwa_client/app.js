@@ -329,6 +329,8 @@ const customerPicker = makePicker({
     items: () => allCustomers(),
     label: c => c.name || c.code,
     sub: c => c.is_new ? `<span class="new-tag">مشتری جدید</span> ${escHtml(c.mobile || c.phone || '')}` : `کد ${faDigits(escHtml(c.code))}`,
+    thumb: c => thumbHtml(c, 'pk round', 'customer'),
+    onSelect: c => showCustomerCard(c),
     emptyText: 'لیست مشتریان هنوز دریافت نشده — «همگام‌سازی» را بزنید',
 });
 
@@ -533,14 +535,15 @@ async function saveNewCustomer() {
 // در گوشی ذخیره می‌شوند تا دفعهٔ بعد و آفلاین هم نمایش داده شوند.
 // ══════════════════════════════════════════
 const imgMem = {}, imgWait = {};
-function articleImage(code, size = 240) {
-    const key = `img_${size}_${code}`;
+const articleImage = (code, size = 240) => entityImage('article', code, size);
+function entityImage(kind, code, size = 240) {
+    const key = kind === 'article' ? `img_${size}_${code}` : `img_${kind}_${size}_${code}`;
     if (imgMem[key] !== undefined) return Promise.resolve(imgMem[key]);
     if (imgWait[key]) return imgWait[key];
     imgWait[key] = new Promise(res => {
         const fromNet = () => {
             if (!navigator.onLine) { res(null); return; }
-            apiFetch(`/article-image?code=${encodeURIComponent(code)}&s=${size}`, { timeout: 30000 })
+            apiFetch(`/${kind}-image?code=${encodeURIComponent(code)}&s=${size}`, { timeout: 30000 })
                 .then(r => r.json()).then(d => {
                     const src = d.status === 'success' ? d.data : null;
                     imgMem[key] = src;
@@ -556,8 +559,26 @@ function articleImage(code, size = 240) {
     return imgWait[key];
 }
 const NO_IMG = '<span class="noimg">📦</span>';
-function thumbHtml(a, cls) {
-    return `<div class="thumb ${cls || ''}" ${a.img ? `data-img="${escHtml(a.code)}"` : ''}>${a.img ? '<span class="ld"></span>' : NO_IMG}</div>`;
+function thumbHtml(a, cls, kind = 'article') {
+    const none = kind === 'customer' ? `<span class="noimg av">${escHtml((a.name || '؟').trim()[0] || '؟')}</span>` : NO_IMG;
+    return `<div class="thumb ${cls || ''}" data-kind="${kind}" ${a.img ? `data-img="${escHtml(a.code)}"` : ''}>${a.img ? '<span class="ld"></span>' : none}</div>`;
+}
+
+// پروفایل مشتری انتخاب‌شده: عکس طرف حساب (از جدول عکس‌های نرم‌افزار فروش) و مشخصات
+function showCustomerCard(c) {
+    const card = document.getElementById('cust-card');
+    if (!c) { card.hidden = true; card.innerHTML = ''; return; }
+    const lines = [c.is_new ? '<span class="new-tag">مشتری جدید</span>' : `کد ${faDigits(escHtml(c.code))}`,
+                   escHtml(c.mobile || c.phone || ''), escHtml(c.address || '')].filter(Boolean);
+    card.innerHTML = `${thumbHtml(c, 'big round', 'customer')}
+        <div class="cc-info"><div class="cc-name">${escHtml(c.name || c.code)}</div>
+        <div class="cc-sub">${lines.join(' · ')}</div></div>`;
+    card.hidden = false;
+    const t = card.querySelector('[data-img]');
+    if (t) entityImage('customer', c.code, 400).then(src => {
+        if (src) t.innerHTML = `<img src="${src}" alt="" onclick="showFullImg(this.src)">`;
+        else t.innerHTML = `<span class="noimg av">${escHtml((c.name || '؟')[0])}</span>`;
+    });
 }
 let imgObserver = null;
 function lazyImages(root) {
@@ -565,7 +586,7 @@ function lazyImages(root) {
     const load = el => {
         el.dataset.done = '1';
         const size = el.classList.contains('big') ? 360 : 160;
-        articleImage(el.dataset.img, size).then(src => { el.innerHTML = src ? `<img src="${src}" alt="">` : NO_IMG; });
+        entityImage(el.dataset.kind || 'article', el.dataset.img, size).then(src => { el.innerHTML = src ? `<img src="${src}" alt="">` : NO_IMG; });
     };
     if (!('IntersectionObserver' in window)) { els.forEach(load); return; }
     imgObserver = imgObserver || new IntersectionObserver(es => es.forEach(e => {
