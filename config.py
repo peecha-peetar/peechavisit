@@ -38,7 +38,7 @@ DATABASES = {
 APP = {
     "NAME":          "پیچا ویزیت",
     "NAME_EN":       "PeechaVisit",
-    "VERSION":       "3.3",
+    "VERSION":       "3.3.1",
     "WEBSITE":       "https://peecha.ir",
     "PRIMARY_COLOR": "#020025",
     "ACCENT_COLOR":  "#4f6ef7",
@@ -84,8 +84,15 @@ GPS = {
 # ── کاتالوگ و عکس کالا (از دیتابیس فروش) ──
 # بدون ری‌استارت اعمال می‌شود
 CATALOG = {
-    "IMAGE_COLUMN": "",        # ستون مسیر عکس در جدول article (خالی = تشخیص خودکار)
-    "IMAGE_DIR":    "",        # پوشهٔ پایه برای مسیرهای نسبی (مثلاً D:\\Images یا \\\\SERVER\\Images)
+    # جدول جدای عکس‌ها (مثل HLOpicturs)؛ اگر در دیتابیس نباشد از ستونی در جدول article استفاده می‌شود
+    "IMAGE_TABLE":    "HLOpicturs",
+    "IMAGE_CODE_COL": "Code",          # کد کالا در جدول عکس
+    "IMAGE_PATH_COL": "PicturePath",   # مسیر فایل عکس
+    "IMAGE_BLOB_COL": "Picture",       # خود عکس داخل دیتابیس (نوع image)
+    "IMAGE_MODE":     "path",          # path = مسیر فایل · db = داخل دیتابیس · auto = مسیر، وگرنه دیتابیس
+    "IMAGE_TYPE":     "",              # فقط ردیف‌هایی با این مقدار Type (خالی = همه)
+    "IMAGE_COLUMN":   "",              # حالت ستون article: ستون مسیر عکس (خالی = تشخیص خودکار)
+    "IMAGE_DIR":      "",              # پوشهٔ پایه برای مسیرهای نسبی یا فقط نام فایل
 }
 
 

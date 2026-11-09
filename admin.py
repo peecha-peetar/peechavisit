@@ -714,40 +714,51 @@ with tab_cfg:
         # ── عکس کالا و کاتالوگ (بدون ری‌استارت) ──
         with st.container(border=True):
             st.markdown("<div class='sec-t'>📚 عکس کالا و کاتالوگ اپ</div>"
-                        "<div class='sec-s'>ستونی از جدول article دیتابیس فروش که مسیر عکس (یا خود عکس) در آن است. "
-                        "«خودکار» یعنی ستونی با نامی مثل Pic / Image / Photo / Aks پیدا شود.</div>", unsafe_allow_html=True)
+                        "<div class='sec-s'>عکس‌ها از جدول عکس‌های نرم‌افزار فروش (مثل HLOpicturs) خوانده می‌شوند: "
+                        "یا از <b>مسیر فایل</b> (ستون PicturePath) یا <b>داخل دیتابیس</b> (ستون Picture). "
+                        "اگر آن جدول نباشد، از ستونی در جدول article.</div>", unsafe_allow_html=True)
             C = cur_cfg.get("CATALOG") or {}
             try:
                 import catalog as _cat
-                acols = [c for c, _t in _cat.article_columns()]
-                detected = _cat.image_column()
+                src_now = _cat.source_text()
             except Exception as e:
-                acols, detected = [], None
-                st.error(f"❌ خواندن ستون‌های جدول article ممکن نشد: {e}")
-            opts = [""] + acols
-            cur_col = C.get("IMAGE_COLUMN") or ""
+                src_now = f"❌ {e}"
+            st.caption(f"منبع فعلی: {src_now}")
+            MODES = {"path": "مسیر فایل (PicturePath)", "db": "داخل دیتابیس (Picture)", "auto": "خودکار: مسیر، وگرنه دیتابیس"}
             with st.form("catalog_form"):
-                k1, k2 = st.columns(2)
-                c_col = k1.selectbox("ستون عکس", opts, index=opts.index(cur_col) if cur_col in opts else 0,
-                                     format_func=lambda c: f"خودکار ({detected or 'پیدا نشد'})" if c == "" else c)
-                c_dir = k2.text_input("پوشهٔ عکس‌ها (برای مسیرهای نسبی یا فقط نام فایل)", C.get("IMAGE_DIR") or "",
+                k1, k2, k3 = st.columns([1.2, 1.4, 1])
+                c_tbl = k1.text_input("جدول عکس‌ها", C.get("IMAGE_TABLE") or "",
+                                      help="خالی = استفاده از ستونی در جدول article")
+                c_mode = k2.radio("روش ذخیرهٔ عکس", list(MODES), format_func=MODES.get, horizontal=False,
+                                  index=list(MODES).index(C.get("IMAGE_MODE") or "path") if (C.get("IMAGE_MODE") or "path") in MODES else 0)
+                c_type = k3.text_input("فقط Type =", C.get("IMAGE_TYPE") or "", help="خالی = همهٔ ردیف‌ها")
+                k4, k5, k6 = st.columns(3)
+                c_code = k4.text_input("ستون کد کالا", C.get("IMAGE_CODE_COL") or "Code")
+                c_path = k5.text_input("ستون مسیر", C.get("IMAGE_PATH_COL") or "PicturePath")
+                c_blob = k6.text_input("ستون عکس (داخل دیتابیس)", C.get("IMAGE_BLOB_COL") or "Picture")
+                c_dir = st.text_input("پوشهٔ عکس‌ها (فقط اگر مسیرها نسبی یا فقط نام فایل هستند)", C.get("IMAGE_DIR") or "",
                                       placeholder=r"D:\Images یا \\SERVER\Images")
-                k3, k4 = st.columns([2, 1])
-                c_test = k3.text_input("آزمون: کد یک کالا", placeholder="مثلاً 0701001")
-                save_cat = k4.form_submit_button("💾 ذخیره و آزمون", type="primary")
+                c_col = st.text_input("حالت ستون article: نام ستون (خالی = تشخیص خودکار)", C.get("IMAGE_COLUMN") or "")
+                k7, k8 = st.columns([2, 1])
+                c_test = k7.text_input("آزمون: کد یک کالا", placeholder="مثلاً 0701001")
+                save_cat = k8.form_submit_button("💾 ذخیره و آزمون", type="primary")
             if save_cat:
-                config.save_settings({"CATALOG": {"IMAGE_COLUMN": c_col, "IMAGE_DIR": c_dir.strip()}})
-                if c_test.strip():
-                    try:
-                        import catalog as _cat
+                config.save_settings({"CATALOG": {
+                    "IMAGE_TABLE": c_tbl.strip(), "IMAGE_MODE": c_mode, "IMAGE_TYPE": c_type.strip(),
+                    "IMAGE_CODE_COL": c_code.strip(), "IMAGE_PATH_COL": c_path.strip(), "IMAGE_BLOB_COL": c_blob.strip(),
+                    "IMAGE_DIR": c_dir.strip(), "IMAGE_COLUMN": c_col.strip()}})
+                try:
+                    import catalog as _cat
+                    st.caption(f"منبع: {_cat.source_text()} · کالاهای دارای عکس: {len(_cat.has_image_values())}")
+                    if c_test.strip():
                         img = _cat.thumbnail(c_test.strip(), 300)
                         if img:
                             st.image(img, caption=f"عکس کالای {c_test.strip()}", width=220)
                         else:
-                            st.warning("برای این کالا عکسی پیدا نشد (مقدار ستون خالی است یا فایل در مسیر نیست). "
+                            st.warning("برای این کالا عکسی پیدا نشد (ردیفی در جدول عکس نیست، مقدار خالی است یا فایل در مسیر نیست). "
                                        "سرویس ویندوز با حساب SYSTEM اجرا می‌شود؛ برای پوشهٔ شبکه دسترسی آن را بررسی کنید.")
-                    except Exception as e:
-                        st.error(f"❌ {e}")
+                except Exception as e:
+                    st.error(f"❌ {e}")
                 st.success("✅ تنظیمات کاتالوگ ذخیره شد (بدون ری‌استارت؛ در اپ با «همگام‌سازی»).")
 
     st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)

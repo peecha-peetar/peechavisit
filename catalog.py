@@ -1,6 +1,8 @@
 # catalog.py - پیچا ویزیت | عکس کالا از دیتابیس فروش (برای اپ: هنگام سفارش و کاتالوگ)
 # ════════════════════════════════════════════════
-# ستون عکس جدول article از تنظیمات (CATALOG.IMAGE_COLUMN) خوانده می‌شود؛ اگر خالی باشد
+# روش ۱ — جدول جدای عکس‌ها (پیش‌فرض HLOpicturs: Code, Picture, PicturePath, Type):
+#   IMAGE_MODE = path → فایل از مسیر PicturePath · db → خود عکس از ستون Picture · auto → مسیر، وگرنه دیتابیس
+# روش ۲ — اگر آن جدول نباشد: ستون عکس جدول article از تنظیمات (CATALOG.IMAGE_COLUMN)؛ اگر خالی باشد
 # ستونی با نامی شبیه Pic / Image / Img / Photo / Aks / Path پیدا می‌شود.
 # مقدار ستون می‌تواند مسیر کامل فایل، مسیر نسبی (نسبت به CATALOG.IMAGE_DIR)، فقط نام فایل،
 # یا خود عکس (ستون باینری) باشد.
@@ -24,6 +26,65 @@ def _settings():
 
 def _sales_db():
     return config.current_settings()["DATABASES"]["SALES_DB"]
+
+
+_ident = lambda s: bool(s) and re.fullmatch(r"[A-Za-z0-9_]+", s) is not None
+
+
+def table_mode():
+    """تنظیمات جدول عکس اگر جدول در دیتابیس فروش وجود دارد، وگرنه None"""
+    s = _settings()
+    t = (s.get("IMAGE_TABLE") or "").strip()
+    cols = {k: (s.get(k) or "").strip() for k in ("IMAGE_CODE_COL", "IMAGE_PATH_COL", "IMAGE_BLOB_COL")}
+    if not _ident(t) or not _ident(cols["IMAGE_CODE_COL"]):
+        return None
+    key = ("tbl", _sales_db(), t)
+    hit = _cache.get(key)
+    if not (hit and time.time() - hit[0] < 120):
+        exists = False
+        try:
+            conn = get_conn(_sales_db()); cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME=?", (t,))
+            exists = cur.fetchone()[0] > 0
+            cur.close(); conn.close()
+        except Exception as e:
+            print(f"⚠️ image table: {e}")
+        hit = (time.time(), exists)
+        _cache[key] = hit
+    if not hit[1]:
+        return None
+    mode = (s.get("IMAGE_MODE") or "path").strip().lower()
+    return {"table": t, "code": cols["IMAGE_CODE_COL"],
+            "path": cols["IMAGE_PATH_COL"] if _ident(cols["IMAGE_PATH_COL"]) else None,
+            "blob": cols["IMAGE_BLOB_COL"] if _ident(cols["IMAGE_BLOB_COL"]) else None,
+            "mode": mode if mode in ("path", "db", "auto") else "path",
+            "type": (s.get("IMAGE_TYPE") or "").strip()}
+
+
+def _tbl_filters(tm):
+    """شرط «عکس دارد» + فیلتر Type"""
+    conds = []
+    if tm["mode"] in ("path", "auto") and tm["path"]:
+        conds.append(f"(ISNULL([{tm['path']}], '') <> '')")
+    if tm["mode"] in ("db", "auto") and tm["blob"]:
+        conds.append(f"(DATALENGTH([{tm['blob']}]) > 0)")
+    where = "(" + " OR ".join(conds) + ")" if conds else "1=0"
+    params = ()
+    if tm["type"]:
+        where += " AND [Type] = ?"
+        params = (tm["type"],)
+    return where, params
+
+
+def source_text():
+    """توضیح منبع عکس برای پنل مدیریت"""
+    tm = table_mode()
+    if tm:
+        m = {"path": f"مسیر فایل ({tm['path']})", "db": f"داخل دیتابیس ({tm['blob']})",
+             "auto": f"مسیر ({tm['path']})، وگرنه دیتابیس ({tm['blob']})"}[tm["mode"]]
+        return f"جدول {tm['table']} — {m}"
+    col = image_column()
+    return f"ستون {col} در جدول article" if col else "منبع عکس پیدا نشد"
 
 
 def article_columns():
@@ -67,6 +128,23 @@ def image_column():
 
 def has_image_values():
     """{کد کالا: True} برای کالاهایی که مقدار عکس دارند"""
+    tm = table_mode()
+    if tm:
+        key = ("has", _sales_db(), repr(sorted(tm.items())))
+        hit = _cache.get(key)
+        if hit and time.time() - hit[0] < 120:
+            return hit[1]
+        out = {}
+        try:
+            where, params = _tbl_filters(tm)
+            conn = get_conn(_sales_db()); cur = conn.cursor()
+            cur.execute(f"SELECT DISTINCT CAST([{tm['code']}] AS NVARCHAR(50)) FROM [{tm['table']}] WHERE {where}", params)
+            out = {(r[0] or "").strip(): True for r in cur.fetchall()}
+            cur.close(); conn.close()
+        except Exception as e:
+            print(f"⚠️ image list (table): {e}")
+        _cache[key] = (time.time(), out)
+        return out
     col = image_column()
     if not col:
         return {}
@@ -106,8 +184,39 @@ def _resolve(value: str):
     return None
 
 
+def _table_image(tm, code):
+    where, params = _tbl_filters(tm)
+    conn = get_conn(_sales_db()); cur = conn.cursor()
+    try:
+        base = f"FROM [{tm['table']}] WHERE [{tm['code']}] = CAST(? AS VARCHAR(50)) AND {where}"
+        if tm["mode"] in ("path", "auto") and tm["path"]:
+            cur.execute(f"SELECT TOP 1 [{tm['path']}] {base} AND ISNULL([{tm['path']}], '') <> '' ORDER BY 1",
+                        (str(code).strip(),) + params)
+            r = cur.fetchone()
+            if r and r[0]:
+                p = _resolve(str(r[0]))
+                if p:
+                    with open(p, "rb") as f:
+                        return f.read()
+                if tm["mode"] == "path":
+                    print(f"⚠️ فایل عکس کالای {code} پیدا نشد: {r[0]}")
+                    return None
+        if tm["mode"] in ("db", "auto") and tm["blob"]:
+            cur.execute(f"SELECT TOP 1 [{tm['blob']}] {base} AND DATALENGTH([{tm['blob']}]) > 0",
+                        (str(code).strip(),) + params)
+            r = cur.fetchone()
+            if r and r[0]:
+                return bytes(r[0])
+        return None
+    finally:
+        cur.close(); conn.close()
+
+
 def image_bytes(code: str):
     """عکس اصلی یک کالا (bytes) یا None"""
+    tm = table_mode()
+    if tm:
+        return _table_image(tm, code)
     col = image_column()
     if not col:
         return None
@@ -131,7 +240,7 @@ def thumbnail(code: str, size: int) -> bytes | None:
     """عکس کوچک‌شده (JPEG) — در حافظه نگه داشته می‌شود"""
     size = max(80, min(int(size or 320), 1200))
     s = _settings()
-    key = ("img", _sales_db(), str(code), size, s.get("IMAGE_COLUMN") or "", s.get("IMAGE_DIR") or "")
+    key = ("img", _sales_db(), str(code), size, repr(sorted(s.items())))
     hit = _cache.get(key)
     if hit and time.time() - hit[0] < (600 if hit[1] else 30):    # «بدون عکس» فقط ۳۰ ثانیه
         return hit[1]
