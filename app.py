@@ -19,6 +19,13 @@ from auth import verify_login
 from mobile_rules import effective_rules
 import audit
 
+# مشخصات همین نسخهٔ در حال اجرا (برای تشخیص اجرای هم‌زمان دو نسخه یا تنظیمات قدیمی)
+SERVER_INFO = {
+    "version": config.APP.get("VERSION"), "tracking_db": TRACKING_DB, "sales_db": SALES_DB,
+    "data_dir": paths.DATA_DIR, "settings_file": config.SETTINGS_FILE, "pid": os.getpid(),
+    "started": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+}
+
 SECRET_KEY    = SECURITY["SESSION_SECRET"]
 SESSION_HOURS = SECURITY["SESSION_HOURS"]
 
@@ -240,6 +247,11 @@ def home():
 # ══════════════════════════════════════════
 # ۱. ورود کاربر — بدون نیاز به token
 # ══════════════════════════════════════════
+@app.route('/api/server-info', methods=['GET'])
+def server_info():
+    return jsonify({"status": "success", **SERVER_INFO}), 200
+
+
 @app.route('/api/login', methods=['POST'])
 def login():
     try:
@@ -331,7 +343,7 @@ def sync_data():
         return jsonify({"status":"success",
                         "customers":customers,
                         "articles":articles,
-                        "settings":{**rules, **gps_rules()}}), 200
+                        "settings":{**rules, **gps_rules()}, "server": SERVER_INFO}), 200
     except Exception as e:
         print(f"❌ sync-data error ({step}): {e}")
         return jsonify({"status":"error","message":f"{step}: {e}"}), 500
@@ -457,8 +469,10 @@ def my_report():
         return jsonify({"status":"error","message":"بازهٔ تاریخ نامعتبر است"}), 400
     if (d1 - d0).days > 370:
         return jsonify({"status":"error","message":"بازهٔ گزارش حداکثر یک سال است"}), 400
+    step = 'اتصال به دیتابیس'
     try:
         conn = get_conn(); cur = conn.cursor()
+        step = 'خواندن ویزیت‌ها'
         cur.execute(f"""
             SELECT v.id, v.visit_date, CONVERT(VARCHAR(5), v.visit_time, 108), v.customer_code,
                    NULL, ISNULL(v.description,''), ISNULL(v.selfie_path,'')
@@ -467,6 +481,7 @@ def my_report():
             ORDER BY v.visit_date DESC, v.visit_time DESC""", (vid, d0, d1))
         visits = [{"id": r[0], "date": str(r[1]), "time": r[2], "customer_code": r[3],
                    "customer": fa_text(r[4]) or r[3], "description": r[5], "selfie": r[6]} for r in cur.fetchall()]
+        step = 'خواندن سفارش‌ها'
         cur.execute(f"""
             SELECT o.id, o.order_date, CONVERT(VARCHAR(5), o.order_time, 108), o.customer_code,
                    NULL, o.total_amount, ISNULL(o.description,'')
@@ -490,6 +505,7 @@ def my_report():
                                                  "qty": float(r[3] or 0), "price": float(r[4] or 0)})
         for o in orders:
             o["items"] = len(o["lines"])
+        step = 'خواندن دریافت‌ها'
         cur.execute(f"""
             SELECT p.id, p.payment_date, CONVERT(VARCHAR(5), p.payment_time, 108), p.customer_code,
                    NULL, p.payment_type, p.amount,
@@ -514,6 +530,7 @@ def my_report():
         last = cur.fetchone()[0]
         cur.close(); conn.close()
         # نام مشتری‌ها و کالاها جدا و یک‌جا (سریع، حتی با دیتابیس فروش بزرگ)
+        step = 'نام مشتری‌ها و کالاها'
         cn = customer_names({x["customer_code"] for x in visits + orders + pays})
         for x in visits + orders + pays:
             x["customer"] = cn.get(str(x["customer_code"]).strip()) or x["customer"]
@@ -522,11 +539,12 @@ def my_report():
             for l in o["lines"]:
                 l["name"] = an.get(str(l["code"]).strip()) or l["name"]
         log('report', f"{d0} تا {d1}")
-        return jsonify({"status":"success", "from": str(d0), "to": str(d1), "last_date": str(last) if last else None,
+        return jsonify({"status":"success", "from": str(d0), "to": str(d1), "last_date": str(last) if last else None, "server": SERVER_INFO,
                         "visits": visits, "orders": orders, "payments": pays}), 200
     except Exception as e:
-        print(f"❌ my-report error: {e}")
-        return jsonify({"status":"error","message":"دریافت گزارش از سرور ممکن نشد"}), 500
+        print(f"❌ my-report error ({step}): {e}")
+        return jsonify({"status":"error", "server": SERVER_INFO,
+                        "message": f"دریافت گزارش از سرور ممکن نشد — مرحله: {step} — {str(e)[:220]}"}), 500
 
 
 @app.route('/api/my-image', methods=['GET'])

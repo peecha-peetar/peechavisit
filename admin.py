@@ -775,6 +775,18 @@ with tab_cfg:
 # ══════════════════════════════════════════════
 # تب ۴ — وضعیت سیستم
 # ══════════════════════════════════════════════
+def api_info() -> dict | None:
+    """مشخصات API در حال اجرا روی پورت موبایل (نسخه‌های قدیمی این مسیر را ندارند → None)"""
+    try:
+        import json as _json
+        port = config.NETWORK["FLASK_PORT"]
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/server-info", timeout=2) as r:
+            d = _json.loads(r.read().decode("utf-8"))
+            return d if d.get("version") else None
+    except Exception:
+        return None
+
+
 def api_alive() -> bool:
     try:
         port = config.NETWORK["FLASK_PORT"]
@@ -802,6 +814,26 @@ with tab_sys:
             st.markdown(f"<div class='svc'><div class='n'>{name} <span style='float:left;font-size:12px'>{note}</span></div>"
                         f"<div class='a'>http://{ip}:{port}</div></div>", unsafe_allow_html=True)
         st.caption("در اپ اندروید، در صفحهٔ ورود بخش «⚙️ آدرس سرور» همین آی‌پی را وارد کنید.")
+
+        # API روی پورت موبایل واقعاً کدام نسخه است و با چه تنظیماتی کار می‌کند؟
+        info = api_info() if alive else None
+        cur_db = config.current_settings()["DATABASES"]
+        if alive and not info:
+            st.error("⚠️ روی پورت API یک سرور **قدیمی** پیچا ویزیت در حال اجراست (این نسخه نیست). "
+                     "احتمالاً هم نسخهٔ نصبی و هم start.bat قدیمی هم‌زمان اجرا شده‌اند و گوشی‌ها به نسخهٔ قدیمی وصل‌اند. "
+                     "پنجره‌های قدیمی «PeechaVisit» را ببندید (یا کامپیوتر را ری‌استارت کنید).")
+        elif info:
+            same_file = os.path.normcase(str(info.get("settings_file"))) == os.path.normcase(SETTINGS_FILE)
+            same_db = (info.get("tracking_db"), info.get("sales_db")) == (cur_db["TRACKING_DB"], cur_db["SALES_DB"])
+            st.markdown(f"<div class='sec-s'>API پاسخ‌دهنده: نسخهٔ {info.get('version')} · دیتابیس فروش "
+                        f"<b>{info.get('sales_db')}</b> · ردیابی <b>{info.get('tracking_db')}</b> · "
+                        f"اجرا از {info.get('started')}</div>", unsafe_allow_html=True)
+            if not same_file:
+                st.error(f"⚠️ API موبایل از فایل تنظیمات دیگری استفاده می‌کند ({info.get('settings_file')})؛ "
+                         "یعنی یک نسخهٔ دیگر پیچا ویزیت (مثلاً start.bat قدیمی کنار نسخهٔ نصبی) پورت API را گرفته است. "
+                         "فقط یکی از آن‌ها را اجرا کنید.")
+            elif not same_db:
+                st.warning("⚠️ API هنوز با دیتابیس قبلی کار می‌کند؛ چند ثانیه صبر کنید (ری‌استارت خودکار) یا سرویس‌ها را دوباره اجرا کنید.")
 
     with s2:
         st.markdown("<div class='sec-t'>🗄️ دیتابیس</div>", unsafe_allow_html=True)

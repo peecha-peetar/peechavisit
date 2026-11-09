@@ -204,6 +204,19 @@ def _restart_signature():
         return None
 
 
+def _check_ports(wanted):
+    """اگر پورتی دست برنامهٔ دیگری باشد (مثلاً نسخهٔ قدیمی یا هم‌زمان start.bat و سرویس نصبی)، واضح بگو"""
+    import socket
+    from config import NETWORK
+    ports = {"api": NETWORK.get("FLASK_PORT", 5000), "pwa": NETWORK.get("PWA_PORT", 8000),
+             "dashboard": NETWORK.get("DASHBOARD_PORT", 8501), "admin": NETWORK.get("ADMIN_PORT", 8502)}
+    for s in wanted:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sk:
+            if sk.connect_ex(("127.0.0.1", int(ports[s]))) == 0:
+                _say(f"⚠️ پورت {ports[s]} ({s}) را برنامهٔ دیگری گرفته است — احتمالاً یک نسخهٔ دیگر پیچا ویزیت "
+                     "(سرویس نصبی یا پنجرهٔ start.bat قدیمی) در حال اجراست. فقط یکی را اجرا کنید.")
+
+
 def supervise(only=None):
     _ensure_secret()
     wanted = only or SERVICES
@@ -240,6 +253,7 @@ def supervise(only=None):
             signal.signal(getattr(signal, sig), lambda *a: (stop(), sys.exit(0)))
 
     _say(f"پیچا ویزیت شروع شد — پوشهٔ داده: {paths.DATA_DIR}")
+    _check_ports(wanted)
     for s in wanted:
         start(s)
     sig = _restart_signature()

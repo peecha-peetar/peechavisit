@@ -1071,6 +1071,10 @@ function showRange(fromIso, toIso) {
     document.getElementById('rep-custom').hidden = false;
     loadReport();
 }
+// سرور پاسخ‌دهنده: نسخه و دیتابیس فروش (برای تشخیص سرور قدیمی یا تنظیمات اشتباه)
+function serverNote(s) {
+    return s ? ` — سرور نسخهٔ ${faDigits(s.version || '?')} · دیتابیس فروش: ${s.sales_db} · ردیابی: ${s.tracking_db}` : ' — سرور نسخهٔ قدیمی (به‌روز کنید)';
+}
 function repAlert(html, isErr) {
     const a = document.getElementById('rep-alert');
     a.hidden = !html; a.innerHTML = html || ''; a.classList.toggle('err', !!isErr);
@@ -1207,9 +1211,9 @@ function loadReport() {
         .then(r => r.json().catch(() => ({ status: 'error', message: `پاسخ نامعتبر از سرور (کد ${r.status}) — نسخهٔ سرور را به‌روز کنید` })))
         .then(d => {
             if (range !== repRange) return;
-            if (d.status !== 'success') { fromCache(d.message || 'دریافت گزارش ناموفق بود', true); return; }
+            if (d.status !== 'success') { fromCache((d.message || 'دریافت گزارش ناموفق بود') + serverNote(d.server), true); return; }
             db.transaction('cached_data', 'readwrite').objectStore('cached_data').put({ type: key, list: d, at: Date.now() });
-            renderReport(d, `بازه: ${jdateFa(from)} تا ${jdateFa(to)} — بروز`);
+            renderReport(d, `بازه: ${jdateFa(from)} تا ${jdateFa(to)} — بروز` + serverNote(d.server));
             const empty = !d.visits.length && !d.orders.length && !d.payments.length;
             if (empty && d.last_date && (d.last_date < from || d.last_date > to)) {
                 const [y, m, dd] = d.last_date.split('-').map(Number);

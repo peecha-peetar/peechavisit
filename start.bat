@@ -9,6 +9,16 @@ if not exist ".venv\Scripts\python.exe" (
     exit /b 1
 )
 
+REM the installed version (Windows service) already runs everything - two copies would fight over the ports
+sc query PeechaVisit 2>nul | find "RUNNING" >nul
+if not errorlevel 1 (
+    echo [!] The installed PeechaVisit service is running on this computer.
+    echo     start.bat is not needed. Use the desktop shortcuts, or stop the service first:
+    echo     "C:\Program Files\PeechaVisit\PeechaVisitService.exe" stop
+    pause
+    exit /b 1
+)
+
 REM close windows left from a previous start, so old code never keeps running
 taskkill /FI "WINDOWTITLE eq PeechaVisit*" /T /F >nul 2>&1
 timeout /t 2 >nul
