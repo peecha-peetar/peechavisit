@@ -216,7 +216,15 @@ function applyRules(r) {
     articlePicker.refresh();
 }
 
-const fmt = n => Number(n || 0).toLocaleString('fa-IR');
+// عدد فارسی با جداکنندهٔ سه‌رقمی — بدون وابستگی به زبان‌های نصب‌شدهٔ WebView گوشی
+function fmt(n) {
+    const v = Number(n || 0);
+    const neg = v < 0, abs = Math.abs(v);
+    let [i, d] = (Math.round(abs * 100) / 100).toString().split('.');
+    i = i.replace(/\B(?=(\d{3})+(?!\d))/g, '٬');
+    const s = (neg ? '-' : '') + i + (d ? '٫' + d : '');
+    return s.replace(/\d/g, x => '۰۱۲۳۴۵۶۷۸۹'[x]);
+}
 
 // ══════════════════════════════════════════
 // مبلغ: ارقام فارسی با جداکنندهٔ سه‌رقمی، هنگام تایپ هم
@@ -228,7 +236,7 @@ function formatMoneyInput(el) {
     const digits = toLatinDigits(el.value).replace(/[^0-9]/g, '').replace(/^0+(?=\d)/, '');
     // تعداد رقم‌های بعد از مکان‌نما ثابت می‌ماند تا مکان‌نما نپرد
     const after = toLatinDigits(el.value.slice(el.selectionStart ?? el.value.length)).replace(/[^0-9]/g, '').length;
-    el.value = digits ? Number(digits).toLocaleString('fa-IR') : '';
+    el.value = digits ? fmt(Number(digits)) : '';
     let pos = el.value.length, seen = 0;
     while (pos > 0 && seen < after) { pos--; if (/[۰-۹]/.test(el.value[pos])) seen++; }
     try { el.setSelectionRange(pos, pos); } catch { }
@@ -319,7 +327,7 @@ const customerPicker = makePicker({
     root: 'customer-picker', hidden: 'main-customer-select',
     items: () => allCustomers(),
     label: c => c.name || c.code,
-    sub: c => c.is_new ? `<span class="new-tag">مشتری جدید</span> ${escHtml(c.mobile || c.phone || '')}` : `کد ${escHtml(c.code)}`,
+    sub: c => c.is_new ? `<span class="new-tag">مشتری جدید</span> ${escHtml(c.mobile || c.phone || '')}` : `کد ${faDigits(escHtml(c.code))}`,
     emptyText: 'لیست مشتریان هنوز دریافت نشده — «همگام‌سازی» را بزنید',
 });
 
@@ -328,7 +336,7 @@ const articlePicker = makePicker({
     items: () => allArticlesRaw,
     label: a => a.name || a.code,
     sub: a => [
-        `کد ${escHtml(a.code)}`,
+        `کد ${faDigits(escHtml(a.code))}`,
         appRules.SHOW_PRICE ? `${fmt(a.price)} ریال` : '',
         appRules.SHOW_STOCK ? (a.stock > 0 ? `موجودی ${fmt(a.stock)}` : '<span class="out">ناموجود</span>') : '',
     ].filter(Boolean).join(' · '),

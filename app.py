@@ -392,50 +392,56 @@ def _chunks(seq, n=400):
         yield seq[i:i + n]
 
 
+# نام همهٔ مشتری‌ها و کالاها از دیتابیس فروش — با همان پرس‌وجوی لیست اپ (روی همهٔ درایورها کار می‌کند)
+# و نگه‌داری ۵ دقیقه‌ای در حافظه
+_NAME_CACHE = {}
+
+
+def _sales_names(table):
+    import time as _t
+    hit = _NAME_CACHE.get((table, SALES_DB))
+    if hit and _t.time() - hit[0] < 300:
+        return hit[1]
+    col_c, col_n = ("C_Code", "C_Name") if table == "customer" else ("A_Code", "A_Name")
+    names = {}
+    try:
+        conn = get_conn(SALES_DB); cur = conn.cursor()
+        cur.execute(f"SELECT CAST({col_c} AS NVARCHAR(50)), CAST({col_n} AS NVARCHAR(200)) FROM {table}")
+        names = {(r[0] or '').strip(): fa_text(r[1]) for r in cur.fetchall() if r[0]}
+        cur.close(); conn.close()
+        _NAME_CACHE[(table, SALES_DB)] = (_t.time(), names)
+    except Exception as e:
+        print(f"⚠️ نام‌های {table}: {e}")
+        if hit:
+            return hit[1]
+    return names
+
+
 def customer_names(codes) -> dict:
-    """نام مشتری‌ها با یک پرس‌وجو برای هر ۴۰۰ کد (بدون JOIN ردیف‌به‌ردیف بین دو دیتابیس → سریع)"""
     codes = {str(c).strip() for c in codes if c}
     out = {}
     if not codes:
         return out
-    new = [c for c in codes if c.startswith('N')]
-    try:
-        conn = get_conn(); cur = conn.cursor()
-        for part in _chunks(new):
-            cur.execute(f"SELECT code, name FROM new_customers WHERE code IN ({','.join('?' * len(part))})", part)
-            out.update({r[0]: f"{r[1]} (جدید)" for r in cur.fetchall()})
-        cur.close(); conn.close()
-    except Exception as e:
-        print(f"⚠️ new customer names: {e}")
-    rest = [c for c in codes if c not in out]
-    if rest:
+    new = [c for c in codes if c.upper().startswith('N')]
+    if new:
         try:
-            conn = get_conn(SALES_DB); cur = conn.cursor()
-            for part in _chunks(rest):
-                cur.execute(f"""SELECT CAST(C_Code AS NVARCHAR(50)), CAST(C_Name AS NVARCHAR(200)) FROM customer
-                                WHERE C_Code IN ({','.join(['CAST(? AS VARCHAR(50))'] * len(part))})""", part)
-                out.update({(r[0] or '').strip(): fa_text(r[1]) for r in cur.fetchall()})
+            conn = get_conn(); cur = conn.cursor()
+            for part in _chunks(new):
+                cur.execute(f"SELECT code, name FROM new_customers WHERE code IN ({','.join('?' * len(part))})", part)
+                out.update({r[0]: f"{r[1]} (جدید)" for r in cur.fetchall()})
             cur.close(); conn.close()
         except Exception as e:
-            print(f"⚠️ customer names: {e}")
+            print(f"⚠️ new customer names: {e}")
+    allnames = _sales_names("customer")
+    for c in codes:
+        if c not in out and allnames.get(c):
+            out[c] = allnames[c]
     return out
 
 
 def article_names(codes) -> dict:
-    codes = {str(c).strip() for c in codes if c}
-    out = {}
-    if not codes:
-        return out
-    try:
-        conn = get_conn(SALES_DB); cur = conn.cursor()
-        for part in _chunks(codes):
-            cur.execute(f"""SELECT CAST(A_Code AS NVARCHAR(50)), CAST(A_Name AS NVARCHAR(200)) FROM article
-                            WHERE A_Code IN ({','.join(['CAST(? AS VARCHAR(50))'] * len(part))})""", part)
-            out.update({(r[0] or '').strip(): fa_text(r[1]) for r in cur.fetchall()})
-        cur.close(); conn.close()
-    except Exception as e:
-        print(f"⚠️ article names: {e}")
-    return out
+    allnames = _sales_names("article")
+    return {c: allnames[c] for c in {str(x).strip() for x in codes if x} if allnames.get(c)}
 
 
 @app.route('/api/new-customer', methods=['POST'])
