@@ -833,7 +833,17 @@ with tab_sys:
                          "یعنی یک نسخهٔ دیگر پیچا ویزیت (مثلاً start.bat قدیمی کنار نسخهٔ نصبی) پورت API را گرفته است. "
                          "فقط یکی از آن‌ها را اجرا کنید.")
             elif not same_db:
-                st.warning("⚠️ API هنوز با دیتابیس قبلی کار می‌کند؛ چند ثانیه صبر کنید (ری‌استارت خودکار) یا سرویس‌ها را دوباره اجرا کنید.")
+                st.warning(f"⚠️ API هنوز با دیتابیس قبلی کار می‌کند (فروش: {info.get('sales_db')}، در تنظیمات: "
+                           f"{cur_db['SALES_DB']}). دکمهٔ «ری‌استارت سرویس‌ها» را بزنید.")
+        if os.environ.get("PEECHA_PARENT"):
+            if st.button("🔄 ری‌استارت همهٔ سرویس‌ها", width="stretch",
+                         help="API، داشبورد، وب‌اپ و همین پنل دوباره اجرا می‌شوند تا تنظیمات تازه اعمال شود."):
+                try:
+                    from peecha_server import request_restart
+                    request_restart()
+                    st.success("✅ درخواست ثبت شد؛ سرویس‌ها ظرف چند ثانیه دوباره اجرا می‌شوند و این صفحه دوباره وصل می‌شود.")
+                except Exception as e:
+                    st.error(f"❌ ری‌استارت ممکن نشد: {e}")
 
     with s2:
         st.markdown("<div class='sec-t'>🗄️ دیتابیس</div>", unsafe_allow_html=True)

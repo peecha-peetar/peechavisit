@@ -469,6 +469,8 @@ def my_report():
         return jsonify({"status":"error","message":"بازهٔ تاریخ نامعتبر است"}), 400
     if (d1 - d0).days > 370:
         return jsonify({"status":"error","message":"بازهٔ گزارش حداکثر یک سال است"}), 400
+    # تاریخ به شکل متن YYYYMMDD: درایور قدیمی «SQL Server» پارامتر نوع date را پشتیبانی نمی‌کند
+    q0, q1 = d0.strftime('%Y%m%d'), d1.strftime('%Y%m%d')
     step = 'اتصال به دیتابیس'
     try:
         conn = get_conn(); cur = conn.cursor()
@@ -478,7 +480,7 @@ def my_report():
                    NULL, ISNULL(v.description,''), ISNULL(v.selfie_path,'')
             FROM visits v
             WHERE v.visitor_id=? AND v.visit_date BETWEEN ? AND ?
-            ORDER BY v.visit_date DESC, v.visit_time DESC""", (vid, d0, d1))
+            ORDER BY v.visit_date DESC, v.visit_time DESC""", (vid, q0, q1))
         visits = [{"id": r[0], "date": str(r[1]), "time": r[2], "customer_code": r[3],
                    "customer": fa_text(r[4]) or r[3], "description": r[5], "selfie": r[6]} for r in cur.fetchall()]
         step = 'خواندن سفارش‌ها'
@@ -487,7 +489,7 @@ def my_report():
                    NULL, o.total_amount, ISNULL(o.description,'')
             FROM orders o
             WHERE o.visitor_id=? AND o.order_date BETWEEN ? AND ?
-            ORDER BY o.order_date DESC, o.order_time DESC""", (vid, d0, d1))
+            ORDER BY o.order_date DESC, o.order_time DESC""", (vid, q0, q1))
         orders = [{"id": r[0], "date": str(r[1]), "time": r[2], "customer_code": r[3],
                    "customer": fa_text(r[4]) or r[3], "total": float(r[5] or 0), "description": r[6],
                    "lines": []} for r in cur.fetchall()]
@@ -498,7 +500,7 @@ def my_report():
                        CAST(oi.quantity AS FLOAT), CAST(oi.price AS FLOAT)
                 FROM order_items oi JOIN orders o ON o.id = oi.order_id
                 WHERE o.visitor_id=? AND o.order_date BETWEEN ? AND ?
-                ORDER BY oi.order_id, oi.id""", (vid, d0, d1))
+                ORDER BY oi.order_id, oi.id""", (vid, q0, q1))
             for r in cur.fetchall():
                 if r[0] in by_id:
                     by_id[r[0]]["lines"].append({"code": r[1], "name": fa_text(r[2]) or r[1],
@@ -515,7 +517,7 @@ def my_report():
                    ISNULL(p.tracking_number,''), ISNULL(p.description,'')
             FROM payments p
             WHERE p.visitor_id=? AND p.payment_date BETWEEN ? AND ?
-            ORDER BY p.payment_date DESC, p.payment_time DESC""", (vid, d0, d1))
+            ORDER BY p.payment_date DESC, p.payment_time DESC""", (vid, q0, q1))
         pays = [{"id": r[0], "date": str(r[1]), "time": r[2], "customer_code": r[3],
                  "customer": fa_text(r[4]) or r[3], "type": r[5], "amount": float(r[6] or 0),
                  "check_number": r[7], "check_sayyadi": r[8], "check_due": str(r[9] or ''),

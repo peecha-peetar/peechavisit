@@ -194,14 +194,28 @@ def _open_log(service):
 RESTART_SECTIONS = ("NETWORK", "DATABASES", "SECURITY", "APP", "PATHS")
 
 
+RESTART_FLAG = os.path.join(paths.DATA_DIR, "run", "restart.flag")
+_sig_err = [None]
+
+
 def _restart_signature():
     import json
     import config
     try:
         cur = config.current_settings()
         return json.dumps({k: cur.get(k) for k in RESTART_SECTIONS}, sort_keys=True, ensure_ascii=False)
-    except Exception:
+    except Exception as e:
+        if str(e) != _sig_err[0]:
+            _sig_err[0] = str(e)
+            _say(f"⚠️ خواندن تنظیمات برای ری‌استارت خودکار ممکن نشد: {e}")
         return None
+
+
+def request_restart():
+    """پنل مدیریت با ساختن این فایل، ری‌استارت همهٔ سرویس‌ها را درخواست می‌کند"""
+    os.makedirs(os.path.dirname(RESTART_FLAG), exist_ok=True)
+    with open(RESTART_FLAG, "w", encoding="utf-8") as f:
+        f.write(time.strftime("%Y-%m-%d %H:%M:%S"))
 
 
 def _check_ports(wanted):
@@ -257,9 +271,19 @@ def supervise(only=None):
     for s in wanted:
         start(s)
     sig = _restart_signature()
+    try:
+        import config
+        d = config.current_settings()["DATABASES"]
+        _say(f"دیتابیس‌ها: ردیابی={d['TRACKING_DB']} · فروش={d['SALES_DB']} · تنظیمات: {config.SETTINGS_FILE}")
+    except Exception:
+        pass
+    try:
+        os.remove(RESTART_FLAG)
+    except OSError:
+        pass
 
-    def restart_all():
-        _say("🔄 تنظیمات دیتابیس/شبکه/امنیت تغییر کرد — شروع دوبارهٔ سرویس‌ها")
+    def restart_all(reason="تنظیمات دیتابیس/شبکه/امنیت تغییر کرد"):
+        _say(f"🔄 {reason} — شروع دوبارهٔ سرویس‌ها")
         time.sleep(2)                    # تا پنل مدیریت پیام ذخیره را نشان دهد
         for p in procs.values():
             if p.poll() is None:
@@ -275,7 +299,17 @@ def supervise(only=None):
     try:
         while not stopping.is_set():
             time.sleep(2)
+            if os.path.exists(RESTART_FLAG):
+                try:
+                    os.remove(RESTART_FLAG)
+                except OSError:
+                    pass
+                sig = _restart_signature() or sig
+                restart_all("درخواست ری‌استارت از پنل مدیریت")
+                continue
             now_sig = _restart_signature()
+            if now_sig is not None and sig is None:
+                sig = now_sig
             if now_sig is not None and sig is not None and now_sig != sig:
                 sig = now_sig
                 restart_all()

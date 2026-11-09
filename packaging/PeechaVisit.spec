@@ -14,7 +14,8 @@ ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))
 
 # ماژول‌های پروژه (داشبورد و پنل مدیریت با runpy اجرا می‌شوند، پس صریح اضافه می‌شوند)
 PROJECT = ["app", "dashboard", "admin", "audit", "auth", "config", "db", "mobile_rules",
-           "panel_auth", "paths", "perms", "report", "ui_font", "ui_theme", "create_tables"]
+           "panel_auth", "paths", "perms", "report", "ui_font", "ui_theme", "create_tables",
+           "peecha_server"]
 
 datas = [
     (os.path.join(ROOT, "pwa_client"), "pwa_client"),
