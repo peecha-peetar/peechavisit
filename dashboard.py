@@ -562,7 +562,18 @@ def order_doc(o, s, items_by_order) -> dict:
     """دادهٔ برگهٔ چاپی یک سفارش"""
     return {"id": int(o["id"]), "date": jdate(o["d"]), "weekday": jweekday(o["d"]), "time": hhmm(o["t"]),
             "visitor": s["visitor"], "customer": s["customer"], "customer_code": s["customer_code"],
-            "lines": items_by_order.get(int(o["id"]), []), "total": o["total"], "description": txt(o.get("descr"))}
+            "lines": items_by_order.get(int(o["id"]), []), "total": o["total"], "description": txt(o.get("descr")),
+            "contact_info": _nc_print_info(s["customer_code"])}
+
+
+def _nc_print_info(code) -> str:
+    """برای مشتری جدید: تلفن و آدرس روی برگهٔ چاپی (مشتری هنوز در نرم‌افزار فروش نیست)"""
+    code = str(code).strip()
+    if not code.upper().startswith("N"):
+        return ""
+    c = new_customer_info(code) or {}
+    parts = [x for x in (c.get("contact"), c.get("mobile"), c.get("phone"), c.get("city"), c.get("address")) if txt(x)]
+    return " · ".join(parts)
 
 
 def print_orders(docs, key):
@@ -586,6 +597,44 @@ def pay_html(p) -> str:
 
 
 KIND_LABEL = {"visit": "ویزیت", "order": "سفارش", "pay": "دریافت"}
+NC_STATUS = {"new": "جدید — بررسی نشده", "done": "در نرم‌افزار فروش تعریف شد", "rejected": "رد شده"}
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def new_customer_info(code: str) -> dict | None:
+    try:
+        df = read_sql("""SELECT n.code, n.name, ISNULL(n.contact,'') AS contact, ISNULL(n.mobile,'') AS mobile,
+                                ISNULL(n.phone,'') AS phone, ISNULL(n.city,'') AS city, ISNULL(n.address,'') AS address,
+                                ISNULL(n.national_id,'') AS national_id, ISNULL(n.description,'') AS description,
+                                n.latitude, n.longitude, n.status, ISNULL(n.sales_code,'') AS sales_code,
+                                CONVERT(VARCHAR(16), n.created_at, 120) AS created, ISNULL(u.full_name, N'') AS visitor
+                         FROM new_customers n LEFT JOIN visitors u ON u.id = n.visitor_id WHERE n.code = ?""", (code,))
+    except Exception:
+        return None
+    return df.iloc[0].to_dict() if len(df) else None
+
+
+def new_customer_box(code: str) -> str:
+    """اطلاعاتی که ویزیتور برای مشتری جدید در اپ وارد کرده است"""
+    c = new_customer_info(code)
+    if not c:
+        return ""
+    tel = lambda v: f"<a href='tel:{esc(v)}' dir='ltr'>{fa(esc(v))}</a>" if txt(v) else ""
+    rows = [("نام", esc(c["name"])), ("کد موقت", f"<span dir='ltr'>{esc(c['code'])}</span>"),
+            ("مسئول / صاحب", esc(c["contact"])), ("موبایل", tel(c["mobile"])), ("تلفن", tel(c["phone"])),
+            ("شهر / منطقه", esc(c["city"])), ("کد / شناسهٔ ملی", fa(esc(c["national_id"]))),
+            ("ثبت توسط", esc(c["visitor"])), ("زمان ثبت", jdate(c["created"][:10]) + " " + fa(c["created"][11:16])),
+            ("وضعیت", NC_STATUS.get(c["status"], c["status"])
+             + (f" · کد فروش {fa(esc(c['sales_code']))}" if txt(c["sales_code"]) else ""))]
+    addr = f"<div class='note' style='margin-top:8px'><b>📍 آدرس:</b> {esc(c['address'])}</div>" if txt(c["address"]) else ""
+    desc = f"<div class='note' style='margin-top:6px'><b>توضیحات:</b> {esc(c['description'])}</div>" if txt(c["description"]) else ""
+    loc = ""
+    if c.get("latitude") and c.get("longitude") and not pd.isna(c["latitude"]):
+        loc = (f"<div class='muted' style='margin-top:6px'><a href='https://www.google.com/maps?q={c['latitude']},{c['longitude']}' "
+               f"target='_blank'>🗺️ محل ثبت‌شدهٔ مشتری روی نقشه</a></div>")
+    return (f"<div class='box' style='border-color:#f5d48a;background:#fffaf0'>"
+            f"<div class='sec'><i style='background:#e8590c'></i>🆕 مشتری جدید (ثبت در اپ — هنوز در نرم‌افزار فروش نیست)</div>"
+            f"{kv([(k, v) for k, v in rows if v])}{addr}{desc}{loc}</div>")
 
 
 def detail_dialog(stop_by_n, items_by_order):
@@ -618,6 +667,9 @@ def detail_dialog(stop_by_n, items_by_order):
             f"<div class='name'>{esc(title)}</div>{amount}"
             f"<div class='chips'>{''.join(f'<span>{c}</span>' for c in chips)}</div></div></div>",
             unsafe_allow_html=True)
+
+        if str(s["customer_code"]).strip().upper().startswith("N"):
+            st.markdown(new_customer_box(str(s["customer_code"]).strip()), unsafe_allow_html=True)
 
         if s["visit"] is not None and txt(s["visit"]["descr"]):
             st.markdown(f"<div class='note'><b>📝 توضیح ویزیت:</b> {esc(s['visit']['descr'])}</div>", unsafe_allow_html=True)

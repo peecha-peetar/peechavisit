@@ -251,6 +251,7 @@ tfoot td {{ font-weight:800; background:#eef1f6; }}
 <div><small>کد مشتری</small><b>{_fa(_esc(o['customer_code']))}</b></div>
 <div><small>ویزیتور</small><b>{_esc(o['visitor'])}</b></div>
 </div>
+{f"<div class='note' style='margin:-4px 0 10px'><b>اطلاعات مشتری جدید:</b> {_esc(o['contact_info'])}</div>" if o.get('contact_info') else ""}
 <table><thead><tr>{head}</tr></thead><tbody>{rows}</tbody><tfoot>{foot}</tfoot></table>
 {note}
 <div class="sign"><div>امضای ویزیتور</div><div>امضا و مهر مشتری</div></div>
