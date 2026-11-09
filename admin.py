@@ -518,6 +518,29 @@ with tab_new:
                 st.error(f"❌ خطا: {e}")
 
 
+def norm_fa(v) -> str:
+    """یکسان‌سازی حروف و ارقام برای جستجو: ي/ى→ی، ك→ک، ارقام فارسی/عربی→انگلیسی"""
+    s = str(v or "").replace("ي", "ی").replace("ى", "ی").replace("ك", "ک").replace("ة", "ه")
+    s = s.translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789"))
+    return " ".join(s.replace("\u200c", " ").lower().split())
+
+
+@st.cache_data(ttl=120, show_spinner="در حال خواندن مشتریان دیتابیس فروش...")
+def sales_customers():
+    """[(کد، نام، متن جستجو)] همهٔ مشتریان دیتابیس فروش — جدیدترین کدها اول"""
+    conn = get_conn(SALES_DB); cur = conn.cursor()
+    cur.execute("SELECT CAST(C_Code AS NVARCHAR(50)), CAST(C_Name AS NVARCHAR(200)) FROM customer")
+    rows = []
+    for code, name in cur.fetchall():
+        code = (code or "").strip()
+        name = (name or "").strip().replace("ي", "ی").replace("ك", "ک")
+        if code:
+            rows.append((code, name, norm_fa(f"{name} {code}")))
+    cur.close(); conn.close()
+    rows.sort(key=lambda r: (len(r[0]), r[0]), reverse=True)
+    return rows
+
+
 # ══════════════════════════════════════════════
 # تب — مشتریان جدیدِ ثبت‌شده در اپ (فقط در tracking)
 # ══════════════════════════════════════════════
@@ -579,20 +602,21 @@ with tab_nc:
                             "همهٔ ویزیت‌ها، سفارش‌ها و دریافت‌هایی که با کد موقت ثبت شده‌اند به کد فروش منتقل می‌شوند و "
                             "از این به بعد هر ثبت با کد موقت (حتی از گوشی آفلاین) خودکار به همان کد فروش می‌رود.</div>",
                             unsafe_allow_html=True)
-                lq = st.text_input("جستجو در مشتریان فروش (نام یا کد)", value=str(r["name"]).split()[0] if r["name"] else "",
-                                   key=f"nc_lq_{pick}")
+                lq = st.text_input("جستجو در مشتریان فروش (نام یا کد)", value="", key=f"nc_lq_{pick}",
+                                   placeholder="خالی = آخرین مشتریان تعریف‌شده")
                 cands = []
-                if lq.strip():
-                    try:
-                        conn = get_conn(SALES_DB); cur = conn.cursor()
-                        like = f"%{lq.strip()}%"
-                        cur.execute("""SELECT TOP 30 CAST(C_Code AS NVARCHAR(50)), CAST(C_Name AS NVARCHAR(200)) FROM customer
-                                       WHERE CAST(C_Name AS NVARCHAR(200)) LIKE ? OR CAST(C_Code AS NVARCHAR(50)) LIKE ?
-                                       ORDER BY C_Code DESC""", (like, like))
-                        cands = [((x[0] or "").strip(), x[1] or "") for x in cur.fetchall()]
-                        cur.close(); conn.close()
-                    except Exception as e:
-                        st.error(f"❌ جستجو در دیتابیس فروش ممکن نشد: {e}")
+                try:
+                    allc = sales_customers()
+                    q = norm_fa(lq)
+                    if q:
+                        words = q.split()
+                        cands = [c for c in allc if all(w in c[2] for w in words)][:100]
+                    else:
+                        cands = allc[:50]          # جدیدترین کدها اول
+                except Exception as e:
+                    st.error(f"❌ خواندن مشتریان دیتابیس فروش ممکن نشد: {e}")
+                cands = [(c[0], c[1]) for c in cands]
+                st.caption(f"{len(cands)} مشتری" + (" (جدیدترین‌ها)" if not lq.strip() else ""))
                 if cands:
                     target = st.selectbox("مشتری متناظر در نرم‌افزار فروش", cands, key=f"nc_target_{pick}",
                                           format_func=lambda c: f"{c[1]} — کد {c[0]}")
@@ -612,7 +636,7 @@ with tab_nc:
                                   f"{moved['visits']} ویزیت، {moved['orders']} سفارش، {moved['payments']} دریافت.")
                             st.rerun()
                 elif lq.strip():
-                    st.caption("مشتری‌ای با این نام یا کد در دیتابیس فروش پیدا نشد.")
+                    st.caption("مشتری‌ای با این نام یا کد در دیتابیس فروش پیدا نشد (بخشی از نام یا کد را امتحان کنید).")
             if r["latitude"] and r["longitude"]:
                 st.markdown(f"📍 [موقعیت روی نقشه](https://www.google.com/maps?q={r['latitude']},{r['longitude']})")
             with st.form(f"nc_form_{pick}"):

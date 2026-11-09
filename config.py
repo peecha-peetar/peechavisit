@@ -38,7 +38,7 @@ DATABASES = {
 APP = {
     "NAME":          "پیچا ویزیت",
     "NAME_EN":       "PeechaVisit",
-    "VERSION":       "3.4",
+    "VERSION":       "3.4.1",
     "WEBSITE":       "https://peecha.ir",
     "PRIMARY_COLOR": "#020025",
     "ACCENT_COLOR":  "#4f6ef7",
