@@ -78,7 +78,11 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force packaging\winsw | Out-Null
-          Invoke-WebRequest $env:WINSW_URL -OutFile packaging\winsw\PeechaVisitService.exe
+          # دانلود با تلاش دوباره (خطای موقت شبکه/گیت‌هاب نباید ساخت را خراب کند)
+          for ($i = 1; $i -le 5; $i++) {
+            try { Invoke-WebRequest $env:WINSW_URL -OutFile packaging\winsw\PeechaVisitService.exe; break }
+            catch { if ($i -eq 5) { throw }; "download failed ($i): $($_.Exception.Message) — retrying"; Start-Sleep (10 * $i) }
+          }
 
       - name: Build installer (Inno Setup)
         shell: pwsh
