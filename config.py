@@ -38,7 +38,7 @@ DATABASES = {
 APP = {
     "NAME":          "پیچا ویزیت",
     "NAME_EN":       "PeechaVisit",
-    "VERSION":       "3.2.3",
+    "VERSION":       "3.3",
     "WEBSITE":       "https://peecha.ir",
     "PRIMARY_COLOR": "#020025",
     "ACCENT_COLOR":  "#4f6ef7",
@@ -81,6 +81,14 @@ GPS = {
 }
 
 
+# ── کاتالوگ و عکس کالا (از دیتابیس فروش) ──
+# بدون ری‌استارت اعمال می‌شود
+CATALOG = {
+    "IMAGE_COLUMN": "",        # ستون مسیر عکس در جدول article (خالی = تشخیص خودکار)
+    "IMAGE_DIR":    "",        # پوشهٔ پایه برای مسیرهای نسبی (مثلاً D:\\Images یا \\\\SERVER\\Images)
+}
+
+
 # ════════════════════════════════════════════════
 # settings.json — تنظیمات ذخیره‌شده از پنل مدیریت
 # ════════════════════════════════════════════════
@@ -89,7 +97,7 @@ SETTINGS_FILE = _os.path.join(_DATA_DIR, "settings.json")
 
 _SECTIONS = {
     "NETWORK": NETWORK, "DATABASES": DATABASES, "APP": APP,
-    "SECURITY": SECURITY, "PATHS": PATHS, "GPS": GPS, "MOBILE": MOBILE,
+    "SECURITY": SECURITY, "PATHS": PATHS, "GPS": GPS, "MOBILE": MOBILE, "CATALOG": CATALOG,
 }
 DEFAULTS = _copy.deepcopy(_SECTIONS)
 

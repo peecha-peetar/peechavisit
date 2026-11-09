@@ -95,6 +95,8 @@
             <div class="picker-list" role="listbox"></div>
         </div>
         <input type="hidden" id="order-article-select">
+        <button type="button" class="btn btn-secondary btn-cat" onclick="openCatalog()">📚 کاتالوگ محصولات (با عکس و جستجو)</button>
+        <div class="art-preview" id="order-art-img" hidden></div>
 
         <div class="row2">
             <div class="price-field">
@@ -213,6 +215,27 @@
         <a href="https://peecha.ir" target="_blank">peecha.ir</a> · پیچا ویزیت ۱۴۰۵
     </footer>
 </main>
+
+<!-- ── کاتالوگ محصولات (عکس از دیتابیس فروش) ── -->
+<div class="report-view" id="cat-view" hidden>
+    <header class="app-header">
+        <button type="button" class="icon-btn" onclick="closeCatalog()">بازگشت</button>
+        <div class="header-text">
+            <h1>کاتالوگ محصولات</h1>
+            <p id="cat-count"></p>
+        </div>
+    </header>
+    <main class="container cat-main">
+        <div class="cat-tools">
+            <input type="search" id="cat-search" placeholder="جستجوی نام یا کد کالا..." autocomplete="off"
+                   oninput="catSearch(this.value)">
+            <label class="check-row" style="margin:6px 0 0"><input type="checkbox" id="cat-only-img" onchange="renderCatalog()"> فقط کالاهای دارای عکس</label>
+        </div>
+        <div class="cat-grid" id="cat-grid"></div>
+        <button type="button" class="btn btn-secondary" id="cat-more" onclick="catMore()" hidden>نمایش کالاهای بیشتر</button>
+    </main>
+    <button type="button" class="cat-basket" id="cat-basket" onclick="catDone()"></button>
+</div>
 
 <!-- ── ثبت مشتری جدید (فقط در دیتابیس پیچا ویزیت، نه نرم‌افزار فروش) ── -->
 <div class="report-view" id="nc-view" hidden>

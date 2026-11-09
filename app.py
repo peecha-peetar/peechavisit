@@ -18,6 +18,7 @@ from db import get_conn, TRACKING_DB, SALES_DB
 from auth import verify_login
 from mobile_rules import effective_rules
 import audit
+import catalog
 
 # مشخصات همین نسخهٔ در حال اجرا (برای تشخیص اجرای هم‌زمان دو نسخه یا تنظیمات قدیمی)
 SERVER_INFO = {
@@ -321,6 +322,12 @@ def sync_data():
         articles = [{"code":(r[0] or '').strip(), "name":fa_text(r[1]),
                      "price":float(r[2] or 0), "stock":float(r[3] or 0)}
                     for r in cur.fetchall()]
+        # کدام کالاها عکس دارند (عکس جدا و فقط وقتی لازم است گرفته می‌شود)
+        step = 'عکس کالاها'
+        with_img = catalog.has_image_values()
+        for a in articles:
+            if with_img.get(a["code"]):
+                a["img"] = True
 
         cur.close(); conn.close()
 
@@ -330,20 +337,23 @@ def sync_data():
             conn = get_conn(); cur = conn.cursor()
             cur.execute("""SELECT code, name, ISNULL(latitude,0), ISNULL(longitude,0), ISNULL(phone,''),
                                   ISNULL(mobile,''), ISNULL(address,''), visitor_id
-                           FROM new_customers WHERE status <> 'rejected' ORDER BY id""")
+                           FROM new_customers WHERE status = 'new' ORDER BY id""")
             known = {c["code"] for c in customers}
             customers += [{"code": r[0], "name": r[1], "lat": float(r[2]), "lng": float(r[3]), "is_new": True,
                            "phone": r[4], "mobile": r[5], "address": r[6], "mine": r[7] == request.current_user['visitor_id']}
                           for r in cur.fetchall() if r[0] not in known]
+            cur.execute("SELECT code, sales_code FROM new_customers WHERE status='done' AND sales_code IS NOT NULL")
+            linked = {r[0]: r[1] for r in cur.fetchall()}
             cur.close(); conn.close()
         except Exception as e:
+            linked = {}
             print(f"⚠️ new customers: {e}")
         print(f"✅ sync-data | {len(customers)} مشتری | {len(articles)} کالا")
         log('sync', f"{len(customers)} مشتری، {len(articles)} کالا")
         return jsonify({"status":"success",
                         "customers":customers,
                         "articles":articles,
-                        "settings":{**rules, **gps_rules()}, "server": SERVER_INFO}), 200
+                        "settings":{**rules, **gps_rules()}, "server": SERVER_INFO, "linked": linked}), 200
     except Exception as e:
         print(f"❌ sync-data error ({step}): {e}")
         return jsonify({"status":"error","message":f"{step}: {e}"}), 500
@@ -384,6 +394,18 @@ def save_new_customer(cur, nc, visitor_id):
                  num('latitude'), num('longitude'), visitor_id, (client_device() or '')[:200] or None))
     log('new_customer', f"{code} — {name[:80]}")
     return code
+
+
+def linked_code(cur, code):
+    """کد موقت مشتری جدید → کد فروش، اگر در پنل مدیریت به مشتری دیتابیس فروش وصل شده باشد"""
+    if not code or not str(code).upper().startswith('N'):
+        return code
+    try:
+        cur.execute("SELECT sales_code FROM new_customers WHERE code=? AND status='done' AND sales_code IS NOT NULL", (code,))
+        r = cur.fetchone()
+        return r[0] if r and r[0] else code
+    except Exception:
+        return code
 
 
 def _chunks(seq, n=400):
@@ -555,6 +577,27 @@ def my_report():
                         "message": f"دریافت گزارش از سرور ممکن نشد — مرحله: {step} — {str(e)[:220]}"}), 500
 
 
+@app.route('/api/article-image', methods=['GET'])
+@require_auth
+def article_image():
+    """عکس کالا از دیتابیس فروش (کوچک‌شده، data URL) — برای سفارش‌گیری و کاتالوگ اپ"""
+    code = (request.args.get('code') or '').strip()
+    try:
+        size = int(request.args.get('s', 320))
+    except ValueError:
+        size = 320
+    if not code:
+        return jsonify({"status": "error", "message": "کد کالا لازم است"}), 400
+    try:
+        data = catalog.thumbnail(code, size)
+    except Exception as e:
+        print(f"⚠️ article-image {code}: {e}")
+        return jsonify({"status": "error", "message": "خواندن عکس کالا ممکن نشد"}), 500
+    if not data:
+        return jsonify({"status": "error", "message": "این کالا عکس ندارد"}), 404
+    return jsonify({"status": "success", "data": "data:image/jpeg;base64," + base64.b64encode(data).decode('ascii')}), 200
+
+
 @app.route('/api/my-image', methods=['GET'])
 @require_auth
 def my_image():
@@ -723,6 +766,7 @@ def submit_visit():
 
         conn = get_conn(); cur = conn.cursor()
         save_new_customer(cur, data.get('new_customer'), visitor_id)   # مشتری جدید (اگر آفلاین ثبت شده)
+        customer_code = linked_code(cur, customer_code)     # مشتری جدیدی که در فروش تعریف و وصل شده
 
         if is_uid_done(cur, uid):
             cur.close(); conn.close()
@@ -802,6 +846,7 @@ def submit_order():
 
         conn = get_conn(); cur = conn.cursor()
         save_new_customer(cur, data.get('new_customer'), visitor_id)   # مشتری جدید (اگر آفلاین ثبت شده)
+        customer_code = linked_code(cur, customer_code)     # مشتری جدیدی که در فروش تعریف و وصل شده
 
         if is_uid_done(cur, order_uid):
             cur.close(); conn.close()
@@ -878,6 +923,7 @@ def submit_payment():
 
         conn = get_conn(); cur = conn.cursor()
         save_new_customer(cur, data.get('new_customer'), visitor_id)   # مشتری جدید (اگر آفلاین ثبت شده)
+        customer_code = linked_code(cur, customer_code)     # مشتری جدیدی که در فروش تعریف و وصل شده
 
         if is_uid_done(cur, pay_uid):
             cur.close(); conn.close()

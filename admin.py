@@ -572,6 +572,47 @@ with tab_nc:
                             format_func=lambda i: (lambda r: f"{r['name']} — {r['code']} — {r['visitor']}")(view[view['id'] == i].iloc[0]))
         if pick is not None:
             r = view[view["id"] == pick].iloc[0]
+            # ── اتصال به مشتری تعریف‌شده در نرم‌افزار فروش + انتقال سوابق ──
+            with st.container(border=True):
+                st.markdown("<div class='sec-t'>🔗 اتصال به مشتری دیتابیس فروش</div>"
+                            "<div class='sec-s'>وقتی واحد مالی این مشتری را در نرم‌افزار فروش تعریف کرد، او را این‌جا پیدا کنید. "
+                            "همهٔ ویزیت‌ها، سفارش‌ها و دریافت‌هایی که با کد موقت ثبت شده‌اند به کد فروش منتقل می‌شوند و "
+                            "از این به بعد هر ثبت با کد موقت (حتی از گوشی آفلاین) خودکار به همان کد فروش می‌رود.</div>",
+                            unsafe_allow_html=True)
+                lq = st.text_input("جستجو در مشتریان فروش (نام یا کد)", value=str(r["name"]).split()[0] if r["name"] else "",
+                                   key=f"nc_lq_{pick}")
+                cands = []
+                if lq.strip():
+                    try:
+                        conn = get_conn(SALES_DB); cur = conn.cursor()
+                        like = f"%{lq.strip()}%"
+                        cur.execute("""SELECT TOP 30 CAST(C_Code AS NVARCHAR(50)), CAST(C_Name AS NVARCHAR(200)) FROM customer
+                                       WHERE CAST(C_Name AS NVARCHAR(200)) LIKE ? OR CAST(C_Code AS NVARCHAR(50)) LIKE ?
+                                       ORDER BY C_Code DESC""", (like, like))
+                        cands = [((x[0] or "").strip(), x[1] or "") for x in cur.fetchall()]
+                        cur.close(); conn.close()
+                    except Exception as e:
+                        st.error(f"❌ جستجو در دیتابیس فروش ممکن نشد: {e}")
+                if cands:
+                    target = st.selectbox("مشتری متناظر در نرم‌افزار فروش", cands, key=f"nc_target_{pick}",
+                                          format_func=lambda c: f"{c[1]} — کد {c[0]}")
+                    if st.button(f"🔗 اتصال «{r['name']}» به کد {target[0]} و انتقال سوابق", type="primary",
+                                 key=f"nc_link_{pick}"):
+                        if len(target[0]) > 10:
+                            st.error("کد فروش بیشتر از ۱۰ کاراکتر است و در ستون کد مشتری جا نمی‌شود.")
+                        else:
+                            conn = get_conn(); cur = conn.cursor()
+                            moved = {}
+                            for tbl in ("visits", "orders", "payments"):
+                                cur.execute(f"UPDATE {tbl} SET customer_code=? WHERE customer_code=?", (target[0], r["code"]))
+                                moved[tbl] = cur.rowcount
+                            cur.execute("UPDATE new_customers SET status='done', sales_code=? WHERE id=?", (target[0], int(pick)))
+                            conn.commit(); cur.close(); conn.close()
+                            flash(f"✅ «{r['name']}» به مشتری «{target[1]}» (کد {target[0]}) وصل شد — منتقل‌شده: "
+                                  f"{moved['visits']} ویزیت، {moved['orders']} سفارش، {moved['payments']} دریافت.")
+                            st.rerun()
+                elif lq.strip():
+                    st.caption("مشتری‌ای با این نام یا کد در دیتابیس فروش پیدا نشد.")
             if r["latitude"] and r["longitude"]:
                 st.markdown(f"📍 [موقعیت روی نقشه](https://www.google.com/maps?q={r['latitude']},{r['longitude']})")
             with st.form(f"nc_form_{pick}"):
@@ -592,6 +633,8 @@ with tab_nc:
             if ok_nc:
                 if not e_name.strip():
                     st.error("نام مشتری خالی است.")
+                elif len(e_sales.strip()) > 10:
+                    st.error("کد فروش بیشتر از ۱۰ کاراکتر است و در ستون کد مشتری جا نمی‌شود.")
                 else:
                     run_sql("""UPDATE new_customers SET name=?, contact=?, mobile=?, phone=?, city=?, national_id=?,
                                address=?, description=?, status=?, sales_code=? WHERE id=?""",
@@ -599,7 +642,17 @@ with tab_nc:
                              e_phone.strip()[:40] or None, e_city.strip()[:60] or None, e_nid.strip()[:20] or None,
                              e_addr.strip()[:400] or None, e_desc.strip()[:400] or None, e_status,
                              e_sales.strip()[:50] or None, int(pick)))
-                    flash(f"✅ اطلاعات «{e_name.strip()}» ذخیره شد.")
+                    note = ""
+                    if e_status == "done" and e_sales.strip():
+                        # همان کار «اتصال»: سوابق کد موقت به کد فروش منتقل می‌شود
+                        conn = get_conn(); cur = conn.cursor(); moved = 0
+                        for tbl in ("visits", "orders", "payments"):
+                            cur.execute(f"UPDATE {tbl} SET customer_code=? WHERE customer_code=?",
+                                        (e_sales.strip()[:10], r["code"]))
+                            moved += cur.rowcount
+                        conn.commit(); cur.close(); conn.close()
+                        note = f" {moved} ثبت به کد {e_sales.strip()} منتقل شد."
+                    flash(f"✅ اطلاعات «{e_name.strip()}» ذخیره شد.{note}")
                     st.rerun()
 
 
@@ -617,7 +670,7 @@ def _valid_host(h: str) -> bool:
 with tab_cfg:
     cur_cfg = config.current_settings()
     # تنظیمات اپ موبایل بدون ری‌استارت اعمال می‌شود، پس در مقایسه نیست
-    live = ("MOBILE", "GPS")     # این‌ها بدون ری‌استارت اعمال می‌شوند
+    live = ("MOBILE", "GPS", "CATALOG")     # این‌ها بدون ری‌استارت اعمال می‌شوند
     loaded = {s: getattr(config, s) for s in DEFAULTS if s not in live}
     if {s: v for s, v in cur_cfg.items() if s not in live} != loaded:
         if os.environ.get("PEECHA_PARENT"):
@@ -657,6 +710,45 @@ with tab_cfg:
                                   "GPS": {"MAX_ACCURACY_METERS": g_acc, "TIMEOUT_SECONDS": g_time}})
             flash("✅ تنظیمات اپ موبایل ذخیره شد و از همین حالا اعمال می‌شود.")
             st.rerun()
+
+        # ── عکس کالا و کاتالوگ (بدون ری‌استارت) ──
+        with st.container(border=True):
+            st.markdown("<div class='sec-t'>📚 عکس کالا و کاتالوگ اپ</div>"
+                        "<div class='sec-s'>ستونی از جدول article دیتابیس فروش که مسیر عکس (یا خود عکس) در آن است. "
+                        "«خودکار» یعنی ستونی با نامی مثل Pic / Image / Photo / Aks پیدا شود.</div>", unsafe_allow_html=True)
+            C = cur_cfg.get("CATALOG") or {}
+            try:
+                import catalog as _cat
+                acols = [c for c, _t in _cat.article_columns()]
+                detected = _cat.image_column()
+            except Exception as e:
+                acols, detected = [], None
+                st.error(f"❌ خواندن ستون‌های جدول article ممکن نشد: {e}")
+            opts = [""] + acols
+            cur_col = C.get("IMAGE_COLUMN") or ""
+            with st.form("catalog_form"):
+                k1, k2 = st.columns(2)
+                c_col = k1.selectbox("ستون عکس", opts, index=opts.index(cur_col) if cur_col in opts else 0,
+                                     format_func=lambda c: f"خودکار ({detected or 'پیدا نشد'})" if c == "" else c)
+                c_dir = k2.text_input("پوشهٔ عکس‌ها (برای مسیرهای نسبی یا فقط نام فایل)", C.get("IMAGE_DIR") or "",
+                                      placeholder=r"D:\Images یا \\SERVER\Images")
+                k3, k4 = st.columns([2, 1])
+                c_test = k3.text_input("آزمون: کد یک کالا", placeholder="مثلاً 0701001")
+                save_cat = k4.form_submit_button("💾 ذخیره و آزمون", type="primary")
+            if save_cat:
+                config.save_settings({"CATALOG": {"IMAGE_COLUMN": c_col, "IMAGE_DIR": c_dir.strip()}})
+                if c_test.strip():
+                    try:
+                        import catalog as _cat
+                        img = _cat.thumbnail(c_test.strip(), 300)
+                        if img:
+                            st.image(img, caption=f"عکس کالای {c_test.strip()}", width=220)
+                        else:
+                            st.warning("برای این کالا عکسی پیدا نشد (مقدار ستون خالی است یا فایل در مسیر نیست). "
+                                       "سرویس ویندوز با حساب SYSTEM اجرا می‌شود؛ برای پوشهٔ شبکه دسترسی آن را بررسی کنید.")
+                    except Exception as e:
+                        st.error(f"❌ {e}")
+                st.success("✅ تنظیمات کاتالوگ ذخیره شد (بدون ری‌استارت؛ در اپ با «همگام‌سازی»).")
 
     st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
     N, D, S, A = cur_cfg["NETWORK"], cur_cfg["DATABASES"], cur_cfg["SECURITY"], cur_cfg["APP"]

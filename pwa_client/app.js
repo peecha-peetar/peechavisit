@@ -259,7 +259,7 @@ function normFa(v) {
 // ══════════════════════════════════════════
 const PICKER_LIMIT = 60;
 
-function makePicker({ root, hidden, items, label, sub, onSelect, emptyText }) {
+function makePicker({ root, hidden, items, label, sub, onSelect, emptyText, thumb }) {
     const wrap  = document.getElementById(root);
     const input = wrap.querySelector('input');
     const list  = wrap.querySelector('.picker-list');
@@ -273,11 +273,12 @@ function makePicker({ root, hidden, items, label, sub, onSelect, emptyText }) {
         const matches = q ? all.filter(it => normFa(label(it)).includes(q) || normFa(it.code).includes(q)) : all;
         shown = matches.slice(0, PICKER_LIMIT);
         list.innerHTML = shown.length
-            ? shown.map((it, i) => `<div class="picker-item${selected && it.code === selected.code ? ' active' : ''}" data-i="${i}" role="option">
-                   <div class="t">${escHtml(label(it))}</div><div class="s">${sub(it)}</div></div>`).join('')
+            ? shown.map((it, i) => `<div class="picker-item${thumb ? ' has-thumb' : ''}${selected && it.code === selected.code ? ' active' : ''}" data-i="${i}" role="option">
+                   ${thumb ? thumb(it) : ''}<div class="pt"><div class="t">${escHtml(label(it))}</div><div class="s">${sub(it)}</div></div></div>`).join('')
               + (matches.length > PICKER_LIMIT
                   ? `<div class="picker-empty">${fmt(matches.length - PICKER_LIMIT)} مورد دیگر — برای دیدن، بیشتر تایپ کنید</div>` : '')
             : `<div class="picker-empty">${all.length ? 'موردی پیدا نشد' : emptyText}</div>`;
+        if (thumb) lazyImages(list);
     }
     const open  = () => { render(); wrap.classList.add('open'); };
     const close = () => wrap.classList.remove('open');
@@ -341,6 +342,7 @@ const articlePicker = makePicker({
         appRules.SHOW_STOCK ? (a.stock > 0 ? `موجودی ${fmt(a.stock)}` : '<span class="out">ناموجود</span>') : '',
     ].filter(Boolean).join(' · '),
     onSelect: a => updateArticleInfo(a),
+    thumb: a => thumbHtml(a, 'pk'),
     emptyText: 'لیست کالاها هنوز دریافت نشده — «همگام‌سازی» را بزنید',
 });
 
@@ -348,6 +350,15 @@ applyRules();   // پیش‌فرض‌ها تا رسیدن تنظیمات از ک
 
 function updateArticleInfo(a) {
     document.getElementById('order-price').value = a ? fmt(a.price) : '';
+    const pv = document.getElementById('order-art-img');
+    pv.hidden = true; pv.innerHTML = '';
+    if (a && a.img) {
+        pv.hidden = false; pv.innerHTML = '<div class="hint">در حال دریافت عکس کالا...</div>';
+        articleImage(a.code, 640).then(src => {
+            if (articlePicker.value && articlePicker.value.code === a.code)
+                pv.innerHTML = src ? `<img src="${src}" alt="" onclick="showFullImg(this.src)">` : '<div class="hint">عکس در دسترس نیست</div>';
+        });
+    }
     const hint = document.getElementById('stock-hint');
     hint.className = 'hint';
     hint.textContent = '';
@@ -381,7 +392,7 @@ function fetchServerData() {
             tx.objectStore("cached_data").put({ type:"articles",  list:d.articles  });
             tx.objectStore("cached_data").put({ type:"settings",  list:d.settings || {} });
             applyRules(d.settings);
-            markServerCustomers(d.customers);
+            markServerCustomers(d.customers, d.linked);
             pushPendingCustomers();
             customerPicker.refresh();
             setListPlaceholders();
@@ -430,14 +441,20 @@ function newCustomerCode() {
     const r = Math.random().toString(36).toUpperCase().slice(2, 4).padEnd(2, '0');
     return 'N' + t + r;              // ۱۰ کاراکتر (اندازهٔ ستون کد مشتری)
 }
-function markServerCustomers(list) {
+function markServerCustomers(list, linked) {
     const codes = new Set((list || []).filter(c => c.is_new).map(c => c.code));
-    let ch = false;
-    newCustomers.forEach(c => { if (codes.has(c.code) && !c.synced) { c.synced = true; ch = true; } });
-    // مشتری‌هایی که روی سرور هستند دیگر لازم نیست در گوشی نگه داشته شوند
+    linked = linked || {};
+    newCustomers.forEach(c => { if (codes.has(c.code) || linked[c.code]) c.synced = true; });
+    // مشتری‌هایی که روی سرور ثبت شده‌اند (یا به مشتری فروش وصل شده‌اند) دیگر در گوشی نگه داشته نمی‌شوند
     const before = newCustomers.length;
-    newCustomers = newCustomers.filter(c => !(c.synced && codes.has(c.code)));
-    if (ch || before !== newCustomers.length) saveNC();
+    newCustomers = newCustomers.filter(c => !c.synced);
+    if (before !== newCustomers.length) saveNC();
+    // اگر مشتری انتخاب‌شده به کد فروش وصل شده، همان کد انتخاب شود
+    const sel = document.getElementById('main-customer-select').value;
+    if (linked[sel]) {
+        const real = allCustomersRaw.find(c => c.code === linked[sel]);
+        if (real) customerPicker.select(real);
+    }
 }
 async function pushPendingCustomers() {
     if (!navigator.onLine) return;
@@ -510,6 +527,116 @@ async function saveNewCustomer() {
 }
 
 // ══════════════════════════════════════════
+// عکس کالا و کاتالوگ
+// ──────────────────────────────────────────
+// عکس‌ها از دیتابیس فروش (از طریق سرور) و فقط برای کالاهای دارای عکس گرفته می‌شوند؛
+// در گوشی ذخیره می‌شوند تا دفعهٔ بعد و آفلاین هم نمایش داده شوند.
+// ══════════════════════════════════════════
+const imgMem = {}, imgWait = {};
+function articleImage(code, size = 240) {
+    const key = `img_${size}_${code}`;
+    if (imgMem[key] !== undefined) return Promise.resolve(imgMem[key]);
+    if (imgWait[key]) return imgWait[key];
+    imgWait[key] = new Promise(res => {
+        const fromNet = () => {
+            if (!navigator.onLine) { res(null); return; }
+            apiFetch(`/article-image?code=${encodeURIComponent(code)}&s=${size}`, { timeout: 30000 })
+                .then(r => r.json()).then(d => {
+                    const src = d.status === 'success' ? d.data : null;
+                    imgMem[key] = src;
+                    if (src && db) db.transaction('cached_data', 'readwrite').objectStore('cached_data').put({ type: key, list: src, at: Date.now() });
+                    res(src);
+                }).catch(() => res(null));
+        };
+        if (!db) { fromNet(); return; }
+        const rq = db.transaction('cached_data', 'readonly').objectStore('cached_data').get(key);
+        rq.onsuccess = () => { if (rq.result && rq.result.list) { imgMem[key] = rq.result.list; res(rq.result.list); } else fromNet(); };
+        rq.onerror = fromNet;
+    }).finally(() => { delete imgWait[key]; });
+    return imgWait[key];
+}
+const NO_IMG = '<span class="noimg">📦</span>';
+function thumbHtml(a, cls) {
+    return `<div class="thumb ${cls || ''}" ${a.img ? `data-img="${escHtml(a.code)}"` : ''}>${a.img ? '<span class="ld"></span>' : NO_IMG}</div>`;
+}
+let imgObserver = null;
+function lazyImages(root) {
+    const els = root.querySelectorAll('[data-img]:not([data-done])');
+    const load = el => {
+        el.dataset.done = '1';
+        const size = el.classList.contains('big') ? 360 : 160;
+        articleImage(el.dataset.img, size).then(src => { el.innerHTML = src ? `<img src="${src}" alt="">` : NO_IMG; });
+    };
+    if (!('IntersectionObserver' in window)) { els.forEach(load); return; }
+    imgObserver = imgObserver || new IntersectionObserver(es => es.forEach(e => {
+        if (e.isIntersecting) { imgObserver.unobserve(e.target); load(e.target); }
+    }), { rootMargin: '200px' });
+    els.forEach(el => imgObserver.observe(el));
+}
+
+let catQuery = '', catLimit = 40;
+function openCatalog() {
+    const v = document.getElementById('cat-view');
+    if (v.hidden) { v.hidden = false; history.pushState({ pvCat: 1 }, ''); }
+    document.getElementById('cat-search').value = catQuery;
+    renderCatalog();
+}
+function closeCatalog() {
+    if (history.state && history.state.pvCat) history.back();
+    else document.getElementById('cat-view').hidden = true;
+}
+window.addEventListener('popstate', () => { document.getElementById('cat-view').hidden = true; });
+function catSearch(v) { catQuery = v; catLimit = 40; renderCatalog(); }
+function renderCatalog() {
+    const q = normFa(catQuery);
+    const onlyImg = document.getElementById('cat-only-img').checked;
+    const all = allArticlesRaw.filter(a => (!q || normFa(a.name).includes(q) || normFa(a.code).includes(q)) && (!onlyImg || a.img));
+    const shown = all.slice(0, catLimit);
+    const inBasket = c => (orderBasket.find(b => b.code === c) || {}).qty || 0;
+    document.getElementById('cat-count').textContent =
+        `${fmt(all.length)} کالا${q ? ' برای «' + catQuery + '»' : ''}`;
+    document.getElementById('cat-grid').innerHTML = shown.map(a => {
+        const n = inBasket(a.code);
+        return `<div class="cat-card">
+            ${thumbHtml(a, 'big')}
+            <div class="cat-name">${escHtml(a.name || a.code)}</div>
+            <div class="cat-meta">کد ${faDigits(escHtml(a.code))}${appRules.SHOW_STOCK ? ` · ${a.stock > 0 ? 'موجودی ' + fmt(a.stock) : '<span class="out">ناموجود</span>'}` : ''}</div>
+            ${appRules.SHOW_PRICE ? `<div class="cat-price">${fmt(a.price)} <small>ریال</small></div>` : ''}
+            <div class="cat-add">
+                <button type="button" onclick="catAdd('${escHtml(a.code)}', 1)">+</button>
+                <span>${n ? fmt(n) : 'افزودن'}</span>
+                <button type="button" onclick="catAdd('${escHtml(a.code)}', -1)" ${n ? '' : 'disabled'}>−</button>
+            </div></div>`;
+    }).join('') || '<div class="hint" style="grid-column:1/-1;text-align:center;padding:20px">کالایی پیدا نشد.</div>';
+    document.getElementById('cat-more').hidden = all.length <= catLimit;
+    updateCatBasket();
+    lazyImages(document.getElementById('cat-grid'));
+}
+function catMore() { catLimit += 40; renderCatalog(); }
+function catAdd(code, d) {
+    const a = allArticlesRaw.find(x => String(x.code) === String(code));
+    if (!a) return;
+    if (d > 0) { if (!addToBasket(a, 1)) return; }
+    else {
+        const it = orderBasket.find(b => b.code === a.code);
+        if (it) { it.qty -= 1; if (it.qty <= 0) orderBasket = orderBasket.filter(b => b !== it); renderBasket(); }
+    }
+    renderCatalog();
+}
+function updateCatBasket() {
+    const n = orderBasket.reduce((t, b) => t + b.qty, 0);
+    const sum = orderBasket.reduce((t, b) => t + b.qty * b.price, 0);
+    document.getElementById('cat-basket').textContent = n
+        ? `🛒 ${fmt(orderBasket.length)} قلم · ${fmt(n)} عدد${appRules.SHOW_PRICE ? ' · ' + fmt(sum) + ' ریال' : ''} — ادامهٔ سفارش`
+        : '🛒 سبد خالی است — بازگشت به فرم';
+}
+function catDone() {
+    closeCatalog();
+    showSection('order');
+    setTimeout(() => document.getElementById('basket-body').scrollIntoView({ behavior: 'smooth', block: 'center' }), 200);
+}
+
+// ══════════════════════════════════════════
 // سبد
 // ══════════════════════════════════════════
 function stepQty(d) {
@@ -521,20 +648,24 @@ function addArticleToBasket() {
     const it = articlePicker.value;
     if (!it) { alert("ابتدا کالا را انتخاب کنید."); return; }
     const qty = parseFloat(document.getElementById("order-qty").value);
-    if (!qty || qty <= 0) { alert("تعداد معتبر نیست."); return; }
+    if (!addToBasket(it, qty)) return;
+    document.getElementById("order-qty").value = "1";
+    articlePicker.select(null);
+}
+function addToBasket(it, qty) {
+    if (!qty || qty <= 0) { alert("تعداد معتبر نیست."); return false; }
     const existing = orderBasket.find(b => b.code === it.code);
     const total = qty + (existing ? existing.qty : 0);
     if (!appRules.ALLOW_OVERSELL && total > (it.stock || 0)) {
         alert(appRules.SHOW_STOCK
             ? `موجودی کافی نیست (موجودی: ${fmt(it.stock)}${existing ? ` — ${fmt(existing.qty)} عدد در سبد است` : ''})`
             : 'موجودی این کالا برای این تعداد کافی نیست.');
-        return;
+        return false;
     }
     if (existing) existing.qty = total;
     else orderBasket.push({ code: it.code, name: it.name, qty, price: parseFloat(it.price) || 0 });
     renderBasket();
-    document.getElementById("order-qty").value = "1";
-    articlePicker.select(null);
+    return true;
 }
 
 function removeArticleFromBasket(i) { orderBasket.splice(i,1); renderBasket(); }
