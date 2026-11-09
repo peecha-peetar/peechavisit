@@ -880,7 +880,7 @@ function resetForm() {
 // صف ارسال از IndexedDB (آفلاین هم کار می‌کند) + ثبت‌های سرور (/api/my-report)
 // که برای مشاهدهٔ آفلاین در کش نگه داشته می‌شود.
 // ══════════════════════════════════════════
-let repRange = 'today';
+let repRange = 'today', repCustom = null;
 const MODE_LABEL = { visit: 'ویزیت', order: 'ویزیت + سفارش', pay: 'ویزیت + دریافت' };
 
 function jdateFa(iso) {
@@ -897,6 +897,8 @@ function repDates(r) {
     if (r === 'week') { const f = new Date(now); f.setDate(f.getDate() - 6); return [localDateStr(f), to]; }
     if (r === 'month') { const [jy, jm] = todayJalali(); return [jalaliToGregorian(jy, jm, 1), to]; }
     if (r === 'q3') { const f = new Date(now); f.setDate(f.getDate() - 89); return [localDateStr(f), to]; }
+    if (r === 'year') { const f = new Date(now); f.setDate(f.getDate() - 364); return [localDateStr(f), to]; }
+    if (r === 'custom' && repCustom) return repCustom;
     return [to, to];
 }
 
@@ -917,7 +919,52 @@ window.addEventListener('popstate', () => { document.getElementById('report-view
 function setRepRange(r) {
     repRange = r;
     document.querySelectorAll('#rep-range .menu-btn').forEach(b => b.classList.toggle('active', b.dataset.r === r));
+    document.getElementById('rep-custom').hidden = r !== 'custom';
+    if (r === 'custom' && !repCustom) { fillCustomRange(); return; }   // اول بازه را انتخاب کند
     loadReport();
+}
+
+// ── بازهٔ دلخواه (شمسی) ──
+const JMONTHS = ['فروردین','اردیبهشت','خرداد','تیر','مرداد','شهریور','مهر','آبان','آذر','دی','بهمن','اسفند'];
+function fillCustomRange(fromIso, toIso) {
+    const [ty] = todayJalali();
+    const set = (p, iso) => {
+        const [y, m, d] = (iso || localDateStr()).split('-').map(Number);
+        const [jy, jm, jd] = gregorianToJalali(y, m, d);
+        const fill = (id, items, val) => {
+            const s = document.getElementById(id);
+            if (!s.options.length) s.innerHTML = items.map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
+            s.value = String(val);
+        };
+        fill(`rc-${p}-day`, Array.from({ length: 31 }, (_, i) => [i + 1, faDigits(i + 1)]), jd);
+        fill(`rc-${p}-month`, JMONTHS.map((n, i) => [i + 1, n]), jm);
+        fill(`rc-${p}-year`, Array.from({ length: 6 }, (_, i) => [ty - 5 + i, faDigits(ty - 5 + i)]), jy);
+    };
+    set('from', fromIso || repDates('month')[0]); set('to', toIso);
+}
+function readCustom(p) {
+    const v = k => document.getElementById(`rc-${p}-${k}`).value;
+    return jalaliToGregorian(v('year'), v('month'), v('day'));
+}
+function applyCustomRange() {
+    let a = readCustom('from'), b = readCustom('to');
+    if (!a || !b) { alert('تاریخ را کامل انتخاب کنید.'); return; }
+    if (a > b) [a, b] = [b, a];
+    if ((new Date(b) - new Date(a)) / 864e5 > 366) { alert('بازهٔ گزارش حداکثر یک سال است.'); return; }
+    repCustom = [a, b];
+    loadReport();
+}
+function showRange(fromIso, toIso) {
+    repCustom = [fromIso, toIso];
+    fillCustomRange(fromIso, toIso);
+    repRange = 'custom';
+    document.querySelectorAll('#rep-range .menu-btn').forEach(b => b.classList.toggle('active', b.dataset.r === 'custom'));
+    document.getElementById('rep-custom').hidden = false;
+    loadReport();
+}
+function repAlert(html, isErr) {
+    const a = document.getElementById('rep-alert');
+    a.hidden = !html; a.innerHTML = html || ''; a.classList.toggle('err', !!isErr);
 }
 
 function renderQueue() {
@@ -1030,8 +1077,10 @@ function closeRepDetail() { document.getElementById('rep-detail').hidden = true;
 function loadReport() {
     const range = repRange;
     const [from, to] = repDates(range);
-    const key = 'report_' + range;
-    const fromCache = note => {
+    const key = 'report_' + (range === 'custom' ? `custom_${from}_${to}` : range);
+    repAlert('');
+    const fromCache = (note, isErr) => {
+        if (isErr) repAlert(`❌ ${escHtml(note)}<br><small>اتصال گوشی به سرور و «آدرس سرور» را بررسی کنید؛ آخرین گزارش ذخیره‌شده نمایش داده می‌شود.</small>`, true);
         if (!db) return;
         db.transaction('cached_data', 'readonly').objectStore('cached_data').get(key).onsuccess = e => {
             const c = e.target.result;
@@ -1043,19 +1092,28 @@ function loadReport() {
             }
         };
     };
-    if (!navigator.onLine) { fromCache('حالت آفلاین'); return; }
+    if (!navigator.onLine) { fromCache('حالت آفلاین', true); return; }
     document.getElementById('rep-stamp').textContent = 'در حال دریافت گزارش...';
     apiFetch(`/my-report?from=${from}&to=${to}`)
         .then(r => r.json())
         .then(d => {
             if (range !== repRange) return;
-            if (d.status !== 'success') { fromCache(d.message || 'دریافت گزارش ناموفق بود'); return; }
+            if (d.status !== 'success') { fromCache(d.message || 'دریافت گزارش ناموفق بود', true); return; }
             db.transaction('cached_data', 'readwrite').objectStore('cached_data').put({ type: key, list: d, at: Date.now() });
-            renderReport(d, 'بروز — ' + jdateFa(localDateStr(new Date())));
+            renderReport(d, `بازه: ${jdateFa(from)} تا ${jdateFa(to)} — بروز`);
+            const empty = !d.visits.length && !d.orders.length && !d.payments.length;
+            if (empty && d.last_date && (d.last_date < from || d.last_date > to)) {
+                const [y, m, dd] = d.last_date.split('-').map(Number);
+                const [jy, jm] = gregorianToJalali(y, m, dd);
+                const mStart = jalaliToGregorian(jy, jm, 1);
+                repAlert(`در این بازه ثبتی برای شما نیست. آخرین ثبت شما: <b>${jdateFa(d.last_date)}</b>
+                    <button type="button" class="btn btn-secondary" onclick="showRange('${mStart}','${d.last_date}')">نمایش ثبت‌های ${JMONTHS[jm - 1]} ${faDigits(jy)}</button>`);
+            } else if (empty && !d.last_date) {
+                repAlert('هنوز هیچ ویزیت، سفارش یا دریافتی با این حساب کاربری در سرور ثبت نشده است.');
+            }
         })
-        .catch(err => { if (err.message !== 'TOKEN_EXPIRED') fromCache('اتصال به سرور برقرار نشد'); });
+        .catch(err => { if (err.message !== 'TOKEN_EXPIRED') fromCache('اتصال به سرور برقرار نشد', true); });
 }
-
 
 // ══════════════════════════════════════════
 // پیام‌ها — گفتگو با مدیر و همکاران

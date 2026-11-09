@@ -75,7 +75,13 @@ button, input, select, textarea { font-family: inherit; }
     border: 0; background: transparent; color: var(--muted);
     border-radius: 9px; padding: 9px 4px; font-size: 14px; font-weight: 700; cursor: pointer;
 }
-#rep-range { grid-template-columns: repeat(4, 1fr); }
+#rep-range { grid-template-columns: repeat(3, 1fr); }
+.rep-alert { border-radius: var(--radius); padding: 10px 12px; margin-bottom: 12px; font-size: 14px; line-height: 1.8;
+    background: var(--warn-soft); border: 1px solid #f5d48a; color: #6b4a00; }
+.rep-alert[hidden] { display: none; }
+.rep-custom[hidden] { display: none; }
+.rep-alert.err { background: #fdecec; border-color: #f3b7b7; color: #a61b1b; }
+.rep-alert .btn { margin-top: 8px; }
 #rep-range .menu-btn { font-size: 13px; padding: 9px 2px; }
 .menu-btn.active { background: var(--card); color: var(--text); box-shadow: 0 1px 2px rgba(16,24,40,.12); }
 

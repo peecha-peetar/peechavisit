@@ -227,8 +227,22 @@
             <button type="button" class="menu-btn active" data-r="today" onclick="setRepRange('today')">امروز</button>
             <button type="button" class="menu-btn" data-r="week" onclick="setRepRange('week')">۷ روز اخیر</button>
             <button type="button" class="menu-btn" data-r="month" onclick="setRepRange('month')">این ماه</button>
-            <button type="button" class="menu-btn" data-r="q3" onclick="setRepRange('q3')">۳ ماه</button>
+            <button type="button" class="menu-btn" data-r="q3" onclick="setRepRange('q3')">۳ ماه اخیر</button>
+            <button type="button" class="menu-btn" data-r="year" onclick="setRepRange('year')">یک سال اخیر</button>
+            <button type="button" class="menu-btn" data-r="custom" onclick="setRepRange('custom')">بازهٔ دلخواه</button>
         </nav>
+        <section class="card card-always rep-custom" id="rep-custom" hidden>
+            <label class="field-label">از تاریخ</label>
+            <div class="jalali-picker">
+                <select id="rc-from-day"></select><select id="rc-from-month"></select><select id="rc-from-year"></select>
+            </div>
+            <label class="field-label">تا تاریخ</label>
+            <div class="jalali-picker">
+                <select id="rc-to-day"></select><select id="rc-to-month"></select><select id="rc-to-year"></select>
+            </div>
+            <button type="button" class="btn btn-primary" onclick="applyCustomRange()">نمایش گزارش این بازه</button>
+        </section>
+        <div class="rep-alert" id="rep-alert" hidden></div>
         <div class="rep-kpis" id="rep-kpis"></div>
 
         <section class="card card-always" id="rep-queue-card">

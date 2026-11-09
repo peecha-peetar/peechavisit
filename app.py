@@ -389,9 +389,15 @@ def my_report():
                  "image": r[10] or r[13], "account": r[11], "tracking": r[12] or r[14],
                  "description": r[15]}
                 for r in cur.fetchall()]
+        # تاریخ آخرین ثبت این کاربر (برای راهنمایی وقتی بازهٔ انتخاب‌شده خالی است)
+        cur.execute("""SELECT MAX(d) FROM (
+                           SELECT MAX(visit_date) AS d FROM visits WHERE visitor_id=?
+                           UNION ALL SELECT MAX(order_date) FROM orders WHERE visitor_id=?
+                           UNION ALL SELECT MAX(payment_date) FROM payments WHERE visitor_id=?) t""", (vid, vid, vid))
+        last = cur.fetchone()[0]
         cur.close(); conn.close()
         log('report', f"{d0} تا {d1}")
-        return jsonify({"status":"success", "from": str(d0), "to": str(d1),
+        return jsonify({"status":"success", "from": str(d0), "to": str(d1), "last_date": str(last) if last else None,
                         "visits": visits, "orders": orders, "payments": pays}), 200
     except Exception as e:
         print(f"❌ my-report error: {e}")
