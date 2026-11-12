@@ -14,6 +14,7 @@
   <description>PeechaVisit - API, mobile web app, dashboard and admin panel</description>
 
   <executable>%BASE%\PeechaVisit.exe</executable>
+  <arguments>--serve</arguments>
   <workingdirectory>%BASE%</workingdirectory>
   <env name="PEECHA_HOME" value="%ProgramData%\PeechaVisit"/>
   <env name="PYTHONUTF8" value="1"/>

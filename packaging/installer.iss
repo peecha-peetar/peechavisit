@@ -58,6 +58,9 @@ Filename: "{app}\Dashboard.url"; Section: "InternetShortcut"; Key: "URL"; String
 Filename: "{app}\Admin Panel.url"; Section: "InternetShortcut"; Key: "URL"; String: "http://localhost:8502"
 
 [Icons]
+Name: "{group}\PeechaVisit - Status and addresses"; Filename: "{app}\PeechaVisitTray.exe"; Parameters: "--page"
+Name: "{commonstartup}\PeechaVisit Tray"; Filename: "{app}\PeechaVisitTray.exe"
+Name: "{commondesktop}\PeechaVisit Status"; Filename: "{app}\PeechaVisitTray.exe"; Parameters: "--page"
 Name: "{group}\PeechaVisit Dashboard"; Filename: "{app}\Dashboard.url"
 Name: "{group}\PeechaVisit Admin Panel"; Filename: "{app}\Admin Panel.url"
 Name: "{group}\Data folder (settings, photos, logs)"; Filename: "{#DataDir}"
@@ -73,9 +76,10 @@ Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""PeechaVisit"" dir=in action=allow protocol=TCP localport=5000,8000,8501,8502"; Flags: runhidden waituntilterminated; StatusMsg: "Opening firewall ports..."
 Filename: "{#Svc}"; Parameters: "install"; Flags: runhidden waituntilterminated; StatusMsg: "Registering Windows service..."
 Filename: "{#Svc}"; Parameters: "start"; Flags: runhidden waituntilterminated; StatusMsg: "Starting service..."
-Filename: "{app}\Admin Panel.url"; Description: "Open the admin panel"; Flags: postinstall shellexec nowait skipifsilent
+Filename: "{app}\PeechaVisitTray.exe"; Parameters: "--page"; Description: "Show status and addresses (tray icon)"; Flags: postinstall nowait skipifsilent runasoriginaluser
 
 [UninstallRun]
+Filename: "{sys}\taskkill.exe"; Parameters: "/IM PeechaVisitTray.exe /F"; Flags: runhidden waituntilterminated; RunOnceId: "TrayStop"
 Filename: "{#Svc}"; Parameters: "stop"; Flags: runhidden waituntilterminated; RunOnceId: "SvcStop"
 Filename: "{#Svc}"; Parameters: "uninstall"; Flags: runhidden waituntilterminated; RunOnceId: "SvcRemove"
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""PeechaVisit"""; Flags: runhidden waituntilterminated; RunOnceId: "Firewall"
@@ -180,6 +184,7 @@ var
   Svc: String;
 begin
   Result := '';
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM PeechaVisitTray.exe /F', '', SW_HIDE, ewWaitUntilTerminated, Code);
   Svc := ExpandConstant('{app}\PeechaVisitService.exe');
   if FileExists(Svc) then
   begin

@@ -138,6 +138,11 @@ button, input, select, textarea { font-family: inherit; }
 .cust-card .cc-name { font-weight: 800; font-size: 15px; }
 .cust-card .cc-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
 .cust-card .cc-info { min-width: 0; }
+.offline-login-bar { display: flex; align-items: center; gap: 8px; justify-content: space-between; margin: 10px 12px 0;
+    padding: 10px 12px; border-radius: 12px; background: var(--warn-soft); border: 1px solid #f5d48a; color: #6b4a00; font-size: 13px; }
+.offline-login-bar[hidden] { display: none; }
+.offline-login-bar button { border: 0; border-radius: 10px; background: #e8590c; color: #fff; font: 700 13px Vazirmatn, Tahoma, sans-serif;
+    padding: 8px 12px; white-space: nowrap; cursor: pointer; }
 .rep-alert.err { background: #fdecec; border-color: #f3b7b7; color: #a61b1b; }
 .rep-alert .btn { margin-top: 8px; }
 #rep-range .menu-btn { font-size: 13px; padding: 9px 2px; }

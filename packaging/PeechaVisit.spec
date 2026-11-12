@@ -60,4 +60,23 @@ exe = EXE(
     version=os.path.join(SPECPATH, "version.txt") if os.path.exists(os.path.join(SPECPATH, "version.txt")) else None,
 )
 
-coll = COLLECT(exe, a.binaries, a.datas, name="PeechaVisit")
+# ── آیکون کنار ساعت ویندوز (بدون پنجرهٔ سیاه) ──
+t = Analysis(
+    [os.path.join(ROOT, "tray_app.py")],
+    pathex=[ROOT],
+    hiddenimports=["pystray", "pystray._win32", "PIL.Image", "PIL.ImageDraw", "PIL.ImageFont", "ui_font"],
+    excludes=["tkinter", "matplotlib", "IPython", "pytest", "streamlit", "pandas", "pyarrow", "numpy"],
+    noarchive=False,
+)
+tpyz = PYZ(t.pure)
+tray = EXE(
+    tpyz,
+    t.scripts,
+    [("X utf8_mode=1", None, "OPTION")],
+    exclude_binaries=True,
+    name="PeechaVisitTray",
+    console=False,
+    icon=os.path.join(SPECPATH, "peecha.ico") if os.path.exists(os.path.join(SPECPATH, "peecha.ico")) else None,
+)
+
+coll = COLLECT(exe, tray, a.binaries, t.binaries, a.datas, t.datas, name="PeechaVisit")

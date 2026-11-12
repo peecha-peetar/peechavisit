@@ -29,3 +29,6 @@ xlsxwriter>=3.1
 # خروجی PDF فارسی در داشبورد (اتصال و راست‌به‌چپ حروف با HarfBuzz)
 fpdf2>=2.8
 uharfbuzz>=0.39
+
+# آیکون کنار ساعت ویندوز در نسخهٔ نصبی (tray_app.py)
+pystray>=0.19; sys_platform == "win32"

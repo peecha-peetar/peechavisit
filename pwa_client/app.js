@@ -60,6 +60,7 @@ function getVisitorName() { const s=getSession(); return s?(s.name||''):''; }
     // session داریم → اپ رو نشون بده (آفلاین یا آنلاین)
     const hp = document.querySelector('.app-header p');
     if (hp && s.name) hp.textContent = `👤 ${s.name}  |  PeechaVisit`;
+    if (!getToken()) document.addEventListener('DOMContentLoaded', showOfflineLoginBar);
 })();
 
 // ══════════════════════════════════════════
@@ -72,6 +73,8 @@ function apiFetch(endpoint, options = {}) {
     }
 
     const token = getToken();
+    // ورود آفلاین (بدون token): به سرور درخواست نمی‌فرستیم؛ ثبت‌ها در صف می‌مانند
+    if (!token) { showOfflineLoginBar(); return Promise.reject(new Error('NO_TOKEN')); }
     const ctrl = new AbortController();
     const wait = options.timeout || 15000;               // پیش‌فرض ۱۵ ثانیه؛ گزارش بیشتر
     const tid  = setTimeout(() => ctrl.abort(), wait);
@@ -100,9 +103,18 @@ function apiFetch(endpoint, options = {}) {
     }).catch(err => {
         clearTimeout(tid);
         if (err.name === 'AbortError') throw new Error('TIMEOUT');
-        if (err.message === 'TOKEN_EXPIRED') throw err;
+        if (err.message === 'TOKEN_EXPIRED' || err.message === 'NO_TOKEN') throw err;
         throw new Error('OFFLINE');
     });
+}
+
+function showOfflineLoginBar() {
+    const bar = document.getElementById('offline-login-bar');
+    if (bar) bar.hidden = false;
+}
+function goOnlineLogin() {
+    const s = getSession();
+    window.location.replace('login.html' + (s && s.username ? `?u=${encodeURIComponent(s.username)}` : ''));
 }
 
 // ══════════════════════════════════════════
@@ -399,7 +411,7 @@ function fetchServerData() {
             customerPicker.refresh();
             setListPlaceholders();
         }).catch(err => {
-            if (err.message === 'TOKEN_EXPIRED') return;
+            if (err.message === 'TOKEN_EXPIRED' || err.message === 'NO_TOKEN') return;   // ورود آفلاین: نوار بالا توضیح می‌دهد
             // آفلاین: اگر کش داریم همان نمایش داده می‌شود
             if (allCustomersRaw.length) console.warn('داده از کش محلی بارگذاری میشه');
             else showSyncError(err.message === 'TIMEOUT' ? 'سرور دیر جواب داد' : 'اتصال به سرور برقرار نشد');
@@ -1056,6 +1068,11 @@ async function syncLocalDataToServer() {
     if (!navigator.onLine) { openReport(true); return; }
     if (isSyncing||isSubmitting) return;
     if (!getSession()) { window.location.replace('login.html'); return; }
+    if (!getToken()) {                 // ورود آفلاین: اول باید به سرور وارد شد
+        pvConfirm('برای ارسال ثبت‌ها، اول باید با اتصال به سرور وارد شوید. ثبت‌ها روی گوشی محفوظ می‌مانند.', 'ورود به سرور', 'بعداً')
+            .then(go => { if (go) goOnlineLogin(); });
+        return;
+    }
     fetchServerData();   // لیست مشتری، کالا و تنظیمات هم بروز شود
     isSyncing = true;
 

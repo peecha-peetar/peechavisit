@@ -25,6 +25,8 @@ SERVER_INFO = {
     "version": config.APP.get("VERSION"), "tracking_db": TRACKING_DB, "sales_db": SALES_DB,
     "data_dir": paths.DATA_DIR, "settings_file": config.SETTINGS_FILE, "pid": os.getpid(),
     "started": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    "ports": {"api": NETWORK.get("FLASK_PORT", 5000), "pwa": NETWORK.get("PWA_PORT", 8000),
+              "dashboard": NETWORK.get("DASHBOARD_PORT", 8501), "admin": NETWORK.get("ADMIN_PORT", 8502)},
 }
 
 SECRET_KEY    = SECURITY["SESSION_SECRET"]

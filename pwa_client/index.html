@@ -27,6 +27,10 @@
     <button type="button" class="icon-btn" onclick="pvConfirm('از حساب خارج می‌شوید؟', 'خروج').then(y => y && logout())" aria-label="خروج">خروج</button>
 </header>
 
+<div class="offline-login-bar" id="offline-login-bar" hidden>
+    <span>📴 ورود آفلاین — ثبت‌ها روی گوشی می‌مانند و بعد از ورود به سرور ارسال می‌شوند.</span>
+    <button type="button" onclick="goOnlineLogin()">ورود به سرور</button>
+</div>
 <main class="container">
 
     <div class="ios-hint" id="ios-hint">

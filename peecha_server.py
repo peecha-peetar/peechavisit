@@ -365,6 +365,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="PeechaVisit", description="پیچا ویزیت — سرور")
     ap.add_argument("--service", choices=SERVICES, help=argparse.SUPPRESS)
     ap.add_argument("--only", nargs="+", choices=SERVICES, help="فقط این سرویس‌ها")
+    ap.add_argument("--serve", action="store_true", help="اجرای همهٔ سرویس‌ها (سرویس ویندوز همین را اجرا می‌کند)")
     ap.add_argument("--check", action="store_true", help="آزمایش اتصال به دیتابیس")
     ap.add_argument("--configure", action="store_true", help="ذخیرهٔ تنظیمات دیتابیس")
     for opt in ("server", "server-ip", "tracking", "sales", "driver", "user", "password"):
@@ -383,6 +384,13 @@ def main(argv=None):
         return configure(a)
     if a.check:
         return check_db()
+    if paths.FROZEN and not (a.serve or a.only):
+        # دوبار کلیک روی PeechaVisit.exe در نسخهٔ نصبی: سرورها را دوباره اجرا نکن (کار سرویس ویندوز است)؛
+        # آیکون کنار ساعت و صفحهٔ «وضعیت و آدرس‌ها» را باز کن
+        tray = os.path.join(os.path.dirname(sys.executable), "PeechaVisitTray.exe")
+        if os.path.exists(tray):
+            subprocess.Popen([tray, "--page"], close_fds=True)
+        return 0
     supervise(a.only)
     return 0
 

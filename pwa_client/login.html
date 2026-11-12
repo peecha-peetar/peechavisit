@@ -188,6 +188,7 @@ document.addEventListener('keydown', e => {
 // نمایش پیام در صورت انقضای token
 (function checkExpired() {
     const params = new URLSearchParams(window.location.search);
+    if (params.get('u')) document.getElementById('username').value = params.get('u');
     if (params.get('expired') === '1') {
         document.getElementById('expired-msg').classList.add('show');
     }
@@ -228,9 +229,11 @@ async function doLogin() {
             signal: controller.signal
         });
         clearTimeout(timeoutId);
+        if (res.status >= 500) throw new Error('SERVER_' + res.status);
         const data = await res.json();
 
         if (data.status === 'success') {
+            pvSaveOfflineCred(username, password, { id: data.user.id, name: data.user.name, role: data.user.role });
             // ✅ sessionStorage - با بستن مرورگر پاک میشه
             // ✅ اطلاعات کاربر → localStorage (ماندگار، آفلاین)
             localStorage.setItem('pv_user_v2', JSON.stringify({
@@ -250,6 +253,15 @@ async function doLogin() {
         }
     } catch(err) {
         console.error('[PeechaVisit] Login error:', err);
+        // سرور در دسترس نیست → ورود آفلاین با آخرین ورود موفق همین کاربر روی این گوشی
+        const off = pvCheckOfflineCred(username, password);
+        if (off.ok) {
+            localStorage.setItem('pv_user_v2', JSON.stringify({ ...off.user, username, loginAt: Date.now(), offline: true }));
+            PV_TOKEN_STORE.removeItem(PV_TOKEN_KEY);
+            window.location.replace('index.html');
+            return;
+        }
+        if (off.reason === 'wrong') { showError('سرور در دسترس نیست و نام کاربری یا رمز با آخرین ورود این گوشی یکی نیست.'); return; }
         const msg = !navigator.onLine
             ? 'اینترنت متصل نیست.'
             : `خطا در اتصال به سرور (${API}). مطمئن شوید سرور روشن است.`;
