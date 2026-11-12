@@ -38,7 +38,7 @@ DATABASES = {
 APP = {
     "NAME":          "پیچا ویزیت",
     "NAME_EN":       "PeechaVisit",
-    "VERSION":       "3.6.1",
+    "VERSION":       "3.7",
     "WEBSITE":       "https://peecha.ir",
     "PRIMARY_COLOR": "#020025",
     "ACCENT_COLOR":  "#4f6ef7",
@@ -97,6 +97,18 @@ CATALOG = {
 }
 
 
+# ── واسطه / ویزیتور نرم‌افزار فروش (بدون ری‌استارت) ──
+# هر کاربر اپ ← یک یا چند کد واسطه؛ اپ فقط مشتریان همان واسطه‌ها را می‌گیرد
+VASETEH = {
+    "ENABLED":     True,               # خاموش = همه همهٔ مشتریان را می‌بینند
+    "TABLE":       "CustomerVaseteh",  # جدول مشتری ← واسطه
+    "CUST_COL":    "C_Code",           # کد مشتری در آن جدول
+    "VASETEH_COL": "Vaseteh_Code",     # کد واسطه در آن جدول
+    "FLAG_COL":    "Vaseteh",          # ستون customer که برای واسطه‌ها True است
+    "NO_CODE":     "all",              # کاربری که واسطه ندارد: all = همهٔ مشتریان · none = هیچ مشتری
+}
+
+
 # ════════════════════════════════════════════════
 # settings.json — تنظیمات ذخیره‌شده از پنل مدیریت
 # ════════════════════════════════════════════════
@@ -105,7 +117,7 @@ SETTINGS_FILE = _os.path.join(_DATA_DIR, "settings.json")
 
 _SECTIONS = {
     "NETWORK": NETWORK, "DATABASES": DATABASES, "APP": APP,
-    "SECURITY": SECURITY, "PATHS": PATHS, "GPS": GPS, "MOBILE": MOBILE, "CATALOG": CATALOG,
+    "SECURITY": SECURITY, "PATHS": PATHS, "GPS": GPS, "MOBILE": MOBILE, "CATALOG": CATALOG, "VASETEH": VASETEH,
 }
 DEFAULTS = _copy.deepcopy(_SECTIONS)
 

@@ -19,6 +19,7 @@ from auth import verify_login
 from mobile_rules import effective_rules
 import audit
 import catalog
+import vaseteh
 
 # مشخصات همین نسخهٔ در حال اجرا (برای تشخیص اجرای هم‌زمان دو نسخه یا تنظیمات قدیمی)
 SERVER_INFO = {
@@ -338,6 +339,13 @@ def sync_data():
 
         cur.close(); conn.close()
 
+        # فقط مشتریان واسطه(های) این کاربر در نرم‌افزار فروش (پنل مدیریت ← کاربر ← واسطه)
+        step = 'مشتریان واسطهٔ این کاربر'
+        me = request.current_user['visitor_id']
+        allowed = vaseteh.allowed_customers(me)
+        if allowed is not None:
+            customers = [c for c in customers if c["code"] in allowed]
+
         # مشتریان جدیدِ ثبت‌شده در اپ (فقط tracking) — برای ثبت ویزیت و سفارش بعدی
         step = 'خواندن مشتریان جدید'
         try:
@@ -348,7 +356,8 @@ def sync_data():
             known = {c["code"] for c in customers}
             customers += [{"code": r[0], "name": r[1], "lat": float(r[2]), "lng": float(r[3]), "is_new": True,
                            "phone": r[4], "mobile": r[5], "address": r[6], "mine": r[7] == request.current_user['visitor_id']}
-                          for r in cur.fetchall() if r[0] not in known]
+                          for r in cur.fetchall()
+                          if r[0] not in known and (allowed is None or r[7] == me)]
             cur.execute("SELECT code, sales_code FROM new_customers WHERE status='done' AND sales_code IS NOT NULL")
             linked = {r[0]: r[1] for r in cur.fetchall()}
             cur.close(); conn.close()

@@ -13,6 +13,8 @@ _SCHEMA = [
     ("visits", "device", "NVARCHAR(200) NULL"),
     ("orders", "device", "NVARCHAR(200) NULL"),
     ("payments", "device", "NVARCHAR(200) NULL"),
+    # کد واسطه/ویزیتور نرم‌افزار فروش (با کاما) — فقط مشتریان همین واسطه‌ها در اپ
+    ("visitors", "sales_codes", "NVARCHAR(400) NULL"),
 ]
 
 _TABLES = {

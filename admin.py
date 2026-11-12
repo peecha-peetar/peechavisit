@@ -25,6 +25,7 @@ from mobile_rules import LABELS as MOBILE_LABELS, global_rules, user_overrides, 
 from ui_font import font_css
 from ui_theme import theme_css, app_bar
 import perms as P
+import vaseteh as V
 
 C1, C2 = APP["PRIMARY_COLOR"], APP["ACCENT_COLOR"]
 PW_MIN = int(SECURITY["PASSWORD_MIN_LEN"])
@@ -71,6 +72,7 @@ input[type=number] {{ direction:ltr; text-align:left; }}
 .b-me {{ background:#fef9c3; color:#854d0e; }}
 .b-app {{ background:#e0f2fe; color:#075985; }}
 .b-dash {{ background:#fff4e6; color:#b35c00; }}
+.b-vas {{ background:#ecfdf5; color:#047857; }}
 
 /* بخش‌ها */
 .sec-t {{ font-size:15px; font-weight:900; color:{C1}; margin:4px 0 2px; }}
@@ -151,6 +153,7 @@ def ensure_cols():
         ("created_at", "DATETIME NOT NULL DEFAULT GETDATE()"),
         ("app_settings", "NVARCHAR(1000) NULL"),
         ("dash_perms", "NVARCHAR(2000) NULL"),
+        ("sales_codes", "NVARCHAR(400) NULL"),
     ]
     try:
         conn = get_conn(autocommit=True); cur = conn.cursor()
@@ -191,6 +194,7 @@ def load_users() -> pd.DataFrame:
                    ISNULL(v.notes,'')             AS notes,
                    ISNULL(v.app_settings,'')      AS app_settings,
                    ISNULL(v.dash_perms,'')        AS dash_perms,
+                   ISNULL(v.sales_codes,'')       AS sales_codes,
                    v.created_at,
                    (SELECT COUNT(*) FROM visits   WHERE visitor_id=v.id) AS n_visits,
                    (SELECT COUNT(*) FROM orders   WHERE visitor_id=v.id) AS n_orders,
@@ -223,6 +227,39 @@ def guard_admin_change(users: pd.DataFrame, uid: int, new_role: str, new_active:
         if active_admins <= 1:
             return "حداقل یک مدیر فعال باید در سامانه باقی بماند."
     return None
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def vaseteh_list():
+    """واسطه‌ها (ویزیتورهای نرم‌افزار فروش): ([{code,name,customers}], خطا)"""
+    try:
+        return V.vasetehs(), None
+    except Exception as e:
+        return [], str(e)
+
+
+def vaseteh_label(code: str) -> str:
+    v = {x["code"]: x for x in vaseteh_list()[0]}.get(code)
+    return f"{v['name']} ({code}) — {v['customers']} مشتری" if v else f"{code} (در نرم‌افزار فروش پیدا نشد)"
+
+
+def vaseteh_names(codes) -> str:
+    names = {x["code"]: x["name"] for x in vaseteh_list()[0]}
+    return "، ".join(names.get(c, c) for c in codes)
+
+
+def vaseteh_picker(container, current, key):
+    """انتخاب یک یا چند واسطهٔ نرم‌افزار فروش برای کاربر"""
+    rows, err = vaseteh_list()
+    opts = [x["code"] for x in rows]
+    opts += [c for c in current if c not in opts]
+    if err:
+        container.caption(f"⚠️ فهرست واسطه‌ها خوانده نشد: {err}")
+    return container.multiselect(
+        "🔗 واسطه / ویزیتور در نرم‌افزار فروش", opts, default=[c for c in current if c in opts],
+        format_func=vaseteh_label, key=key, placeholder="بدون واسطه",
+        help="اپ فقط مشتریانی را نشان می‌دهد که در نرم‌افزار فروش یکی از این واسطه‌ها را دارند "
+             "(جدول CustomerVaseteh). خالی = طبق تنظیمات (همه یا هیچ). مدیر همیشه همه را می‌بیند.")
 
 
 def avatar_color(name: str) -> str:
@@ -318,6 +355,7 @@ with tab_users:
                 + ("<span class='badge b-me'>شما</span>" if is_me else "")
                 + ("<span class='badge b-app'>📱 تنظیمات اختصاصی</span>" if user_overrides(u["app_settings"]) else "")
                 + ("<span class='badge b-dash'>📊 داشبورد</span>" if role != "admin" and P.parse(u["dash_perms"])["access"] else "")
+                + (f"<span class='badge b-vas'>🔗 {vaseteh_names(V.parse_codes(u['sales_codes']))}</span>" if u["sales_codes"] else "")
             )
             last_visit = to_jalali(u["last_visit"], with_time=False)
             st.markdown(f"""
@@ -354,6 +392,7 @@ with tab_users:
                     new_notes = c5.text_input("📝 یادداشت", value=str(u["notes"]))
                     c6.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
                     new_act = c6.toggle("حساب فعال", value=act)
+                    new_vas = vaseteh_picker(st, V.parse_codes(u["sales_codes"]), f"vas_{uid}")
                     saved = st.form_submit_button("💾 ذخیرهٔ تغییرات", type="primary")
 
                 if saved:
@@ -368,9 +407,9 @@ with tab_users:
                         st.error(f"❌ {err}")
                     else:
                         try:
-                            fields = "full_name=?, phone=?, role=?, is_active=?, notes=?"
+                            fields = "full_name=?, phone=?, role=?, is_active=?, notes=?, sales_codes=?"
                             params = [new_name.strip(), new_phone.strip() or None, new_role,
-                                      int(new_act), new_notes.strip() or None]
+                                      int(new_act), new_notes.strip() or None, V.dump_codes(new_vas)]
                             if new_pass:
                                 fields += ", password_hash=?, failed_attempts=0, locked_until=NULL"
                                 params.append(hash_password(new_pass))
@@ -469,9 +508,17 @@ with tab_new:
                 "<div class='sec-s'>پس از ثبت، کاربر با همین نام کاربری و رمز وارد اپ موبایل می‌شود.</div>",
                 unsafe_allow_html=True)
     ver = st.session_state.setdefault("new_user_ver", 0)
-    with st.form(f"new_user_{ver}"):
+    _vrows, _verr = vaseteh_list()
+    pick = st.selectbox("🔗 انتخاب ویزیتور از نرم‌افزار فروش (اختیاری)", [""] + [x["code"] for x in _vrows],
+                        format_func=lambda c: "— بدون واسطه / ورود دستی —" if not c else vaseteh_label(c),
+                        key=f"nu_pick_{ver}",
+                        help="نام از نرم‌افزار فروش پر می‌شود و کاربر فقط مشتریان همین واسطه را در اپ می‌بیند.")
+    if _verr:
+        st.caption(f"⚠️ فهرست واسطه‌ها خوانده نشد: {_verr} — تب تنظیمات ← «واسطه / ویزیتور».")
+    _pname = next((x["name"] for x in _vrows if x["code"] == pick), "")
+    with st.form(f"new_user_{ver}_{pick}"):
         n1, n2 = st.columns(2)
-        n_full = n1.text_input("👤 نام و نام خانوادگی *", placeholder="مثال: علی محمدی")
+        n_full = n1.text_input("👤 نام و نام خانوادگی *", value=_pname, placeholder="مثال: علی محمدی")
         n_user = n1.text_input("🔑 نام کاربری *", placeholder="ali.m",
                                help="فقط حروف انگلیسی، عدد و . _ - (۳ تا ۵۰ کاراکتر)")
         n_phone = n1.text_input("📱 شماره موبایل", placeholder="09121234567")
@@ -479,6 +526,7 @@ with tab_new:
         n_pass2 = n2.text_input("🔒 تکرار رمز عبور *", type="password")
         n_role = n2.selectbox("🛡️ نقش", ["visitor", "admin"],
                               format_func=lambda x: "🧭 ویزیتور" if x == "visitor" else "🛡️ مدیر سیستم")
+        n_vas = vaseteh_picker(st, [pick] if pick else [], f"nu_vas_{ver}_{pick}")
         n_notes = st.text_area("📝 یادداشت (اختیاری)", height=80)
         create = st.form_submit_button("✅ ثبت کاربر", type="primary")
 
@@ -507,10 +555,10 @@ with tab_new:
         else:
             try:
                 run_sql("""INSERT INTO visitors
-                           (username,password_hash,full_name,role,phone,notes,is_active)
-                           VALUES (?,?,?,?,?,?,1)""",
+                           (username,password_hash,full_name,role,phone,notes,is_active,sales_codes)
+                           VALUES (?,?,?,?,?,?,1,?)""",
                         (uname, hash_password(n_pass), n_full.strip(), n_role,
-                         n_phone.strip() or None, n_notes.strip() or None))
+                         n_phone.strip() or None, n_notes.strip() or None, V.dump_codes(n_vas)))
                 st.session_state["new_user_ver"] = ver + 1
                 flash(f"✅ کاربر «{n_full.strip()}» با نام کاربری @{uname} ثبت شد.")
                 st.rerun()
@@ -694,7 +742,7 @@ def _valid_host(h: str) -> bool:
 with tab_cfg:
     cur_cfg = config.current_settings()
     # تنظیمات اپ موبایل بدون ری‌استارت اعمال می‌شود، پس در مقایسه نیست
-    live = ("MOBILE", "GPS", "CATALOG")     # این‌ها بدون ری‌استارت اعمال می‌شوند
+    live = ("MOBILE", "GPS", "CATALOG", "VASETEH")     # این‌ها بدون ری‌استارت اعمال می‌شوند
     loaded = {s: getattr(config, s) for s in DEFAULTS if s not in live}
     if {s: v for s, v in cur_cfg.items() if s not in live} != loaded:
         if os.environ.get("PEECHA_PARENT"):
@@ -800,6 +848,38 @@ with tab_cfg:
                 except Exception as e:
                     st.error(f"❌ {e}")
                 st.success("✅ تنظیمات کاتالوگ ذخیره شد (بدون ری‌استارت؛ در اپ با «همگام‌سازی»).")
+
+        # ── واسطه / ویزیتور نرم‌افزار فروش (بدون ری‌استارت) ──
+        with st.container(border=True):
+            st.markdown("<div class='sec-t'>🔗 واسطه / ویزیتور نرم‌افزار فروش</div>"
+                        "<div class='sec-s'>ویزیتور در جدول customer با <b>Vaseteh = True</b> تعریف می‌شود و مشتریانش در جدول "
+                        "<b>CustomerVaseteh</b> هستند. به هر کاربر (تب کاربران) یک یا چند واسطه بدهید تا در اپ فقط "
+                        "مشتریان خودش را ببیند.</div>", unsafe_allow_html=True)
+            VS = cur_cfg.get("VASETEH") or {}
+            NO_CODE = {"all": "همهٔ مشتریان را ببیند", "none": "هیچ مشتری‌ای نبیند"}
+            with st.form("vaseteh_form"):
+                v_on = st.toggle("فقط مشتریان واسطهٔ هر کاربر در اپ نمایش داده شود", value=bool(VS.get("ENABLED", True)))
+                v1, v2, v3, v4 = st.columns(4)
+                v_tbl = v1.text_input("جدول مشتری ← واسطه", VS.get("TABLE") or "CustomerVaseteh")
+                v_cc = v2.text_input("ستون کد مشتری", VS.get("CUST_COL") or "C_Code")
+                v_vc = v3.text_input("ستون کد واسطه", VS.get("VASETEH_COL") or "Vaseteh_Code")
+                v_flag = v4.text_input("ستون واسطه در customer", VS.get("FLAG_COL") or "Vaseteh")
+                v_none = st.radio("کاربری که واسطه ندارد", list(NO_CODE), format_func=NO_CODE.get, horizontal=True,
+                                  index=1 if VS.get("NO_CODE") == "none" else 0)
+                save_vas = st.form_submit_button("💾 ذخیره و آزمون", type="primary")
+            if save_vas:
+                config.save_settings({"VASETEH": {
+                    "ENABLED": v_on, "TABLE": v_tbl.strip(), "CUST_COL": v_cc.strip(),
+                    "VASETEH_COL": v_vc.strip(), "FLAG_COL": v_flag.strip(), "NO_CODE": v_none}})
+                vaseteh_list.clear()
+                rows, err = vaseteh_list()
+                if err:
+                    st.error(f"❌ {err}")
+                else:
+                    st.success(f"✅ ذخیره شد · {len(rows)} واسطه پیدا شد (بدون ری‌استارت؛ در اپ با «همگام‌سازی»).")
+                    if rows:
+                        st.dataframe(pd.DataFrame([{"کد": r["code"], "نام": r["name"], "تعداد مشتری": r["customers"]}
+                                                   for r in rows]), hide_index=True, width="stretch")
 
     st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
     N, D, S, A = cur_cfg["NETWORK"], cur_cfg["DATABASES"], cur_cfg["SECURITY"], cur_cfg["APP"]
