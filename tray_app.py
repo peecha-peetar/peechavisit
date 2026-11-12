@@ -6,6 +6,13 @@
 # صفحهٔ «وضعیت و آدرس‌ها» در مرورگر باز می‌شود (فارسی و راست‌به‌چپ درست نمایش داده می‌شود):
 #   http://127.0.0.1:8599
 # ════════════════════════════════════════════════
+import sys as _sys
+# خروجی همیشه UTF-8: در ویندوز فارسی (cp1256) چاپ ✅/❌ در لاگ، برنامه را از کار می‌انداخت
+for _s in (_sys.stdout, _sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 import json
 import os
 import socket

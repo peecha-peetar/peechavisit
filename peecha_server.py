@@ -10,6 +10,13 @@
 # سرویس ویندوز (WinSW) همین برنامه را بدون آرگومان اجرا می‌کند؛ اگر یکی از
 # سرویس‌ها از کار بیفتد چند ثانیه بعد دوباره اجرا می‌شود.
 # ════════════════════════════════════════════════
+import sys as _sys
+# خروجی همیشه UTF-8: در ویندوز فارسی (cp1256) چاپ ✅/❌ در لاگ، برنامه را از کار می‌انداخت
+for _s in (_sys.stdout, _sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 import argparse
 import os
 import secrets
