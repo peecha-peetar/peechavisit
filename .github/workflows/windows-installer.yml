@@ -119,7 +119,9 @@ jobs:
         shell: pwsh
         run: |
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
-          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+          # فایل فارسی (Persian.isl) نسخهٔ 6.5 به بعد لازم دارد
+          choco upgrade innosetup -y --no-progress | Out-Null
+          (Get-Item $iscc).VersionInfo.ProductVersion
           & $iscc /Q "/DAppVersion=${{ steps.ver.outputs.version }}" packaging\installer.iss
           if ($LASTEXITCODE -ne 0) { throw "iscc failed" }
 

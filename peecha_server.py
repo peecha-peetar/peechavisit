@@ -361,10 +361,49 @@ def configure(a) -> int:
     return 0
 
 
+def setup_db() -> int:
+    """ساخت دیتابیس پیچا ویزیت (اگر نیست) + جدول‌ها؛ تکرارش بی‌خطر است (نصب‌کننده اجرا می‌کند)."""
+    import config, db, create_tables as ct, audit
+    name = config.DATABASES.get("TRACKING_DB") or "tracking"
+    sales = config.DATABASES.get("SALES_DB") or ""
+    windows_auth = not (config.DATABASES.get("USER") or "").strip()
+    try:
+        conn = db.get_conn(None, autocommit=True); cur = conn.cursor()
+        cur.execute("DECLARE @n sysname = ?; IF DB_ID(@n) IS NULL BEGIN "
+                    "DECLARE @s nvarchar(400) = N'CREATE DATABASE ' + QUOTENAME(@n); EXEC(@s); END", name)
+        print(f"database ok: {name}")
+        if windows_auth:
+            # سرویس ویندوز با حساب SYSTEM اجرا می‌شود: دسترسی آن به دیتابیس‌ها
+            grant = ("IF SUSER_ID(N'NT AUTHORITY\\SYSTEM') IS NULL CREATE LOGIN [NT AUTHORITY\\SYSTEM] FROM WINDOWS; "
+                     "DECLARE @d sysname = ?, @r sysname = ?, @s nvarchar(800); "
+                     "IF DB_ID(@d) IS NOT NULL BEGIN SET @s = N'USE ' + QUOTENAME(@d) + N'; "
+                     "IF USER_ID(N''NT AUTHORITY\\SYSTEM'') IS NULL CREATE USER [NT AUTHORITY\\SYSTEM] FOR LOGIN [NT AUTHORITY\\SYSTEM]; "
+                     "ALTER ROLE ' + @r + N' ADD MEMBER [NT AUTHORITY\\SYSTEM];'; EXEC(@s); END")
+            for d, role in ((name, "db_owner"), (sales, "db_datareader")):
+                if not d:
+                    continue
+                try:
+                    cur.execute(grant, d, role); print(f"service access ok: {d}")
+                except Exception as e:
+                    print(f"service access FAIL {d}: {e}")
+        conn.close()
+        orig = ct.get_conn
+        ct.get_conn = lambda db=None, autocommit=False: orig(name if db == "tracking" else db, autocommit)
+        ct.create_tables()
+        ct.alter_existing_tables()
+        audit.ensure_schema()
+        print("tables ok")
+        return 0
+    except Exception as e:
+        print(f"FAIL: {e}")
+        return 1
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="PeechaVisit", description="پیچا ویزیت — سرور")
     ap.add_argument("--service", choices=SERVICES, help=argparse.SUPPRESS)
     ap.add_argument("--only", nargs="+", choices=SERVICES, help="فقط این سرویس‌ها")
+    ap.add_argument("--setup-db", action="store_true", help="ساخت دیتابیس و جدول‌ها")
     ap.add_argument("--serve", action="store_true", help="اجرای همهٔ سرویس‌ها (سرویس ویندوز همین را اجرا می‌کند)")
     ap.add_argument("--check", action="store_true", help="آزمایش اتصال به دیتابیس")
     ap.add_argument("--configure", action="store_true", help="ذخیرهٔ تنظیمات دیتابیس")
@@ -382,6 +421,8 @@ def main(argv=None):
         return 0
     if a.configure:
         return configure(a)
+    if a.setup_db:
+        return setup_db()
     if a.check:
         return check_db()
     if paths.FROZEN and not (a.serve or a.only):
