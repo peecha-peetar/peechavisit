@@ -133,7 +133,7 @@ def _font_css():
 
 
 PAGE = """<!DOCTYPE html><html lang="fa" dir="rtl"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>پیچا ویزیت — وضعیت و آدرس‌ها</title>%FONT%
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>پیچا ویزیت — وضعیت و آدرس‌ها</title><link rel="icon" href="/favicon.png">%FONT%
 <style>
 body{font-family:Vazirmatn,Tahoma,sans-serif;background:#f3f5fb;color:#17202e;margin:0}
 header{background:#020025;color:#fff;padding:16px 22px;display:flex;align-items:center;gap:14px}
@@ -154,7 +154,7 @@ button.main{background:#3b5bdb;color:#fff}
 .tag{font-size:11px;border-radius:10px;padding:1px 8px;background:#eef1f6;color:#495057;margin-right:6px}
 .hint{color:#6b7686;font-size:13px;line-height:1.9}
 </style></head><body>
-<header><span class="dot" id="hd"></span><div><h1>پیچا ویزیت — وضعیت و آدرس‌ها</h1><small id="sub"></small></div></header>
+<header><img src="/logo.png" alt="" style="width:34px;height:34px"><span class="dot" id="hd"></span><div><h1>پیچا ویزیت — وضعیت و آدرس‌ها</h1><small id="sub"></small></div></header>
 <main>
 <div class="card"><div class="big"><span class="dot" id="bd"></span><span id="bt">...</span></div>
 <div class="hint" id="meta" style="margin-top:6px"></div>
@@ -209,6 +209,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith("/status.json"):
             return self._send(200, json.dumps(status_json(), ensure_ascii=False), "application/json; charset=utf-8")
+        if self.path == "/favicon.png":
+            import io
+            buf = io.BytesIO(); make_icon((0, 44, 100, 255)).save(buf, "PNG")
+            return self._send(200, buf.getvalue(), "image/png")
+        if self.path == "/logo.png" and _logo_path():
+            with open(_logo_path(), "rb") as f:
+                return self._send(200, f.read(), "image/png")
         if self.path in ("/", "/index.html"):
             return self._send(200, PAGE.replace("%FONT%", _font_css()), "text/html; charset=utf-8")
         self._send(404, "not found", "text/plain")
@@ -228,21 +235,35 @@ def open_status():
 # ══════════════════════════════════════════
 # آیکون کنار ساعت
 # ══════════════════════════════════════════
+def _logo_path():
+    for base in (getattr(sys, "_MEIPASS", ""), os.path.dirname(os.path.abspath(__file__)),
+                 os.path.join(os.path.dirname(os.path.abspath(__file__)), "packaging")):
+        p = os.path.join(base, "peecha_logo.png")
+        if base and os.path.exists(p):
+            return p
+    return None
+
+
 def make_icon(color):
-    from PIL import Image, ImageDraw
-    im = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
-    d = ImageDraw.Draw(im)
-    d.rounded_rectangle((2, 2, 62, 62), radius=14, fill=(2, 0, 37, 255))
-    d.ellipse((38, 38, 62, 62), fill=color, outline=(255, 255, 255, 255), width=3)
-    d.text((14, 8), "P", fill=(255, 255, 255, 255), font=_big_font())
-    return im
+    """لوگوی پیچا (گربهٔ سفید) روی کاشی به رنگ وضعیت: سبز / نارنجی / قرمز"""
+    from PIL import Image, ImageDraw, ImageFilter
+    s4 = 256
+    im = Image.new("RGBA", (s4, s4), (0, 0, 0, 0))
+    ImageDraw.Draw(im).rounded_rectangle((0, 0, s4 - 1, s4 - 1), radius=56, fill=color)
+    lp = _logo_path()
+    if lp:
+        m = Image.open(lp).convert("RGBA").getchannel("A").filter(ImageFilter.MaxFilter(9)).resize((200, 200), Image.LANCZOS)
+        im.paste(Image.new("RGBA", (200, 200), (255, 255, 255, 255)), (28, 30), m)
+    else:
+        ImageDraw.Draw(im).text((70, 40), "P", fill=(255, 255, 255, 255), font=_big_font(150))
+    return im.resize((64, 64), Image.LANCZOS)
 
 
-def _big_font():
+def _big_font(size=40):
     from PIL import ImageFont
     for f in ("arialbd.ttf", "segoeuib.ttf", "DejaVuSans-Bold.ttf"):
         try:
-            return ImageFont.truetype(f, 40)
+            return ImageFont.truetype(f, size)
         except OSError:
             continue
     return ImageFont.load_default()

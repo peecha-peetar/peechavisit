@@ -22,7 +22,9 @@ from PIL import Image
 from folium.plugins import MarkerCluster
 from streamlit_folium import st_folium
 
-st.set_page_config(page_title="داشبورد | پیچا ویزیت", page_icon="📍",
+import os as _os, paths as _paths
+_ICON = _os.path.join(_paths.RES_DIR, "pwa_client", "icon-192.png")   # لوگوی پیچا
+st.set_page_config(page_title="داشبورد | پیچا ویزیت", page_icon=_ICON if _os.path.exists(_ICON) else "📍",
                    layout="wide", initial_sidebar_state="collapsed")
 
 from db import get_conn, SALES_DB
@@ -829,7 +831,7 @@ def page_map():
 
     rtxt = range_text(j0, j1, g0, g1)
     amt = lambda v: f" · {money(v)}" if SHOW_MONEY else ""
-    bar.markdown(app_bar("📍 داشبورد پیچا ویزیت", f"{rtxt} · {esc(sel_vname)}", [
+    bar.markdown(app_bar("داشبورد پیچا ویزیت", f"{rtxt} · {esc(sel_vname)}", [
         f"<b>{fa(len(f_visits))}</b> ویزیت",
         f"<b>{fa(len({s['customer_code'] for s in stops}))}</b> مشتری",
         f"<b>{fa(len(f_orders))}</b> سفارش{amt(order_sum)}",

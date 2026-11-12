@@ -32,7 +32,10 @@ PW_MIN = int(SECURITY["PASSWORD_MIN_LEN"])
 USERNAME_RE = re.compile(r"^[A-Za-z0-9._-]{3,50}$")
 INSECURE_SECRET = DEFAULTS["SECURITY"]["SESSION_SECRET"]
 
-st.set_page_config(page_title=f"مدیریت | {APP['NAME']}", page_icon="🛠️", layout="wide")
+import paths
+_ICON = os.path.join(paths.RES_DIR, "pwa_client", "icon-192.png")   # لوگوی پیچا
+st.set_page_config(page_title=f"مدیریت | {APP['NAME']}",
+                   page_icon=_ICON if os.path.exists(_ICON) else "🛠️", layout="wide")
 
 # ══════════════════════════════════════════════
 # ظاهر
@@ -271,7 +274,7 @@ def avatar_color(name: str) -> str:
 # هدر
 # ══════════════════════════════════════════════
 now_j = jdatetime.datetime.now()
-st.markdown(app_bar(f"🛠️ پنل مدیریت {APP['NAME']}",
+st.markdown(app_bar(f"پنل مدیریت {APP['NAME']}",
                     f"نسخهٔ {APP['VERSION']} · {now_j.strftime('%Y/%m/%d  %H:%M')}",
                     [f"👑 {ADMIN['name']} (@{ADMIN['username']})"]), unsafe_allow_html=True)
 _, hc_out = st.columns([7, 1])

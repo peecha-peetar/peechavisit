@@ -14,6 +14,8 @@ def theme_css() -> str:
 :root {{ --brand:{BRAND}; --primary:{PRIMARY}; --soft:#edf1ff; --bg:#f4f5f8; --card:#fff;
          --border:#dfe3ea; --text:#17202e; --muted:#6b7686; }}
 .stApp {{ background:var(--bg); direction:rtl; }}
+/* متن راهنمای داخل کادرها خیلی کم‌رنگ تا با مقدار واقعی اشتباه نشود */
+.stApp input::placeholder, .stApp textarea::placeholder {{ color:#aab2bf !important; opacity:.38 !important; }}
 header[data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stDecoration"] {{ display:none !important; }}
 /* بلوک‌هایی که فقط <style> دارند جا نگیرند (CSS داخلشان همچنان اعمال می‌شود) */
 [data-testid="stElementContainer"]:has(> [data-testid="stMarkdown"] style):not(:has(div.pv-bar, .pv-login-card, .gal, .pv-notes)) {{ display:none; }}
@@ -54,7 +56,28 @@ p, label, .stMarkdown, .stCaption, .stAlert {{ direction:rtl; text-align:right; 
 </style>"""
 
 
+_LOGO = None
+
+
+def logo_img(size: int = 28, css: str = "") -> str:
+    """لوگوی پیچا (همان آیکون اپ) به شکل <img> داخل صفحه"""
+    global _LOGO
+    if _LOGO is None:
+        import base64, os
+        from paths import RES_DIR
+        try:
+            with open(os.path.join(RES_DIR, "pwa_client", "icon-192.png"), "rb") as f:
+                _LOGO = "data:image/png;base64," + base64.b64encode(f.read()).decode()
+        except OSError:
+            _LOGO = ""
+    if not _LOGO:
+        return ""
+    return (f"<img src='{_LOGO}' alt='' style='width:{size}px;height:{size}px;border-radius:{size // 4}px;"
+            f"background:#fff;flex:none;{css}'>")
+
+
 def app_bar(title: str, subtitle: str = "", chips: list[str] | None = None) -> str:
     chips_html = "".join(f"<span class='chip'>{c}</span>" for c in (chips or []))
     sub = f"<span class='s'>{subtitle}</span>" if subtitle else ""
-    return f"<div class='pv-bar'><span class='t'>{title}</span>{sub}<span class='sp'></span>{chips_html}</div>"
+    return (f"<div class='pv-bar'>{logo_img(28)}<span class='t'>{title}</span>{sub}"
+            f"<span class='sp'></span>{chips_html}</div>")

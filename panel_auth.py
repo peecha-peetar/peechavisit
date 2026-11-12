@@ -11,6 +11,7 @@ from auth import verify_login
 from db import get_conn
 import perms as P
 import audit
+from ui_theme import logo_img
 
 
 def _log(source, event, user=None, username=None, detail=None):
@@ -64,7 +65,7 @@ def _login_form(title, icon, subtitle, check, source):
     with mid:
         st.markdown(f"""
         <div class='pv-login-card'>
-            <div class='ic'>{icon}</div>
+            <div class='ic'>{logo_img(64) or icon}</div>
             <div class='t'>{title}</div>
             <div class='s'>{APP["NAME"]} — {subtitle}</div>
         </div>""", unsafe_allow_html=True)

@@ -21,6 +21,7 @@ datas = [
     (os.path.join(ROOT, "pwa_client"), "pwa_client"),
     (os.path.join(ROOT, "fonts"), "fonts"),
     (os.path.join(ROOT, ".streamlit", "config.toml"), ".streamlit"),
+    (os.path.join(SPECPATH, "peecha_logo.png"), "."),
 ]
 binaries = []
 hiddenimports = list(PROJECT) + ["waitress", "pyodbc", "jdatetime", "xlsxwriter", "PIL.Image"]
@@ -64,6 +65,7 @@ exe = EXE(
 t = Analysis(
     [os.path.join(ROOT, "tray_app.py")],
     pathex=[ROOT],
+    datas=[(os.path.join(SPECPATH, "peecha_logo.png"), ".")],
     hiddenimports=["pystray", "pystray._win32", "PIL.Image", "PIL.ImageDraw", "PIL.ImageFont", "ui_font"],
     excludes=["tkinter", "matplotlib", "IPython", "pytest", "streamlit", "pandas", "pyarrow", "numpy"],
     noarchive=False,

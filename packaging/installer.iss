@@ -45,6 +45,10 @@ WizardSizePercent=120
 ShowLanguageDialog=no
 UninstallDisplayName={#AppName} (سرور)
 UninstallDisplayIcon={app}\PeechaVisit.exe
+; لوگوی پیچا: آیکون فایل نصب و تصویرهای صفحه‌های نصب (packaging/make_icons.py)
+SetupIconFile=peecha.ico
+WizardImageFile=wizard_large_164.bmp,wizard_large_246.bmp,wizard_large_328.bmp
+WizardSmallImageFile=wizard_small_58.bmp,wizard_small_87.bmp,wizard_small_116.bmp
 CloseApplications=no
 
 [Languages]
