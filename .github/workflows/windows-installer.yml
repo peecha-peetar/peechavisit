@@ -52,24 +52,25 @@ jobs:
           $found = Get-ChildItem dist\PeechaVisit -Recurse -File | Where-Object { $names -contains $_.Name }
           if ($found) { $found | ForEach-Object { $_.FullName }; throw "project source found in build" }
 
-      # بدون دیتابیس: وب‌اپ، داشبورد و پنل مدیریت باید بالا بیایند (صفحهٔ ورود)
+      # بدون دیتابیس: API، وب‌اپ، داشبورد و پنل مدیریت باید بالا بیایند (صفحهٔ ورود)
       - name: Smoke test
         shell: pwsh
         run: |
           $env:PEECHA_HOME = "$env:RUNNER_TEMP\pvhome"
-          $p = Start-Process dist\PeechaVisit\PeechaVisit.exe -ArgumentList '--only','pwa','dashboard','admin' -PassThru -NoNewWindow
+          $p = Start-Process dist\PeechaVisit\PeechaVisit.exe -ArgumentList '--only','api','pwa','dashboard','admin' -PassThru -NoNewWindow
           $ok = $false
           for ($i = 0; $i -lt 40 -and -not $ok; $i++) {
             Start-Sleep 3
             try {
+              $api = 0; try { $api = (Invoke-WebRequest http://127.0.0.1:5000/ -UseBasicParsing).StatusCode } catch { }
               $a = (Invoke-WebRequest http://127.0.0.1:8000/ -UseBasicParsing).StatusCode
               $b = (Invoke-WebRequest http://127.0.0.1:8501/_stcore/health -UseBasicParsing).StatusCode
               $c = (Invoke-WebRequest http://127.0.0.1:8502/_stcore/health -UseBasicParsing).StatusCode
-              $ok = ($a -eq 200 -and $b -eq 200 -and $c -eq 200)
-              "try $i : web=$a dashboard=$b admin=$c"
+              $ok = ($api -eq 200 -and $a -eq 200 -and $b -eq 200 -and $c -eq 200)
+              "try $i : api=$api web=$a dashboard=$b admin=$c"
             } catch { }
           }
-          Get-ChildItem "$env:PEECHA_HOME\logs" | ForEach-Object { "== $($_.Name)"; Get-Content $_.FullName -Tail 15 }
+          Get-ChildItem "$env:PEECHA_HOME\logs" | ForEach-Object { "== $($_.Name)"; Get-Content $_.FullName -Tail 40 }
           # آیکون کنار ساعت: صفحهٔ وضعیت باید جواب بدهد و سرویس‌ها را «روشن» ببیند
           $t = Start-Process dist\PeechaVisit\PeechaVisitTray.exe -PassThru
           $tray = $null
